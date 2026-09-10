@@ -83,13 +83,36 @@ test('ephemeral storage is explicit and unavailable or basic-text stores are rej
   await assert.rejects(loadOrCreateSeed(new InMemorySecretStore('basic_text'), 'seed', true));
 });
 
+test('concurrent identity creation uses the durable atomic winner and never an overwritten seed', async () => {
+  let reads = 0;
+  let releaseReads!: () => void;
+  const bothRead = new Promise<void>(resolve => { releaseReads = resolve; });
+  let stored: Uint8Array | null = null;
+  const atomicStore: SecretStore = {
+    async protection() { return 'os-protected'; },
+    async read() { if (++reads === 2) releaseReads(); await bothRead; return null; },
+    async createIfAbsent(_name, candidate) {
+      // Represents the host's atomic durable create-if-absent operation.
+      stored ??= new Uint8Array(candidate);
+      return new Uint8Array(stored);
+    },
+  };
+  const [first, second] = await Promise.all([loadOrCreateSeed(atomicStore, 'seed'), loadOrCreateSeed(atomicStore, 'seed')]);
+  assert.deepEqual(first, second); assert.deepEqual(first, stored);
+  const memory = new InMemorySecretStore();
+  const [winner, repeated] = await Promise.all([memory.createIfAbsent('seed', first), memory.createIfAbsent('seed', new Uint8Array(32).fill(7))]);
+  assert.deepEqual(winner, first); assert.deepEqual(repeated, first); assert.deepEqual(await memory.read('seed'), first);
+  const invalidStore: SecretStore = { ...atomicStore, async read() { return null; }, async createIfAbsent() { return new Uint8Array(31); } };
+  await assert.rejects(loadOrCreateSeed(invalidStore, 'seed'), /invalid length/);
+});
+
 test('real adapter stop cancels a pending protected-seed startup before it can create a worker', async () => {
   let releaseRead: (value: Uint8Array | null) => void = () => { throw new Error('read resolver not initialized'); };
   const pendingRead = new Promise<Uint8Array | null>((resolve) => { releaseRead = resolve; });
   const delayedStore: SecretStore = {
     async protection() { return 'os-protected'; },
     read() { return pendingRead; },
-    async write() {},
+    async createIfAbsent(_name, candidate) { return candidate; },
   };
   const transport = new HyperDhtTransport({ secretStore: delayedStore, bootstrap: [{ host: '127.0.0.1', port: 49_737 }], startupTimeoutMs: 100 });
   const starting = transport.start();
@@ -105,7 +128,7 @@ test('real adapter startup deadline includes a SecretStore that never returns an
   const neverStore: SecretStore = {
     async protection() { return 'os-protected'; },
     read() { return pendingRead; },
-    async write() {},
+    async createIfAbsent(_name, candidate) { return candidate; },
   };
   const transport = new HyperDhtTransport({ secretStore: neverStore, bootstrap: [{ host: '127.0.0.1', port: 49_737 }], startupTimeoutMs: 20 });
   await assert.rejects(transport.start(), /startup timed out/);

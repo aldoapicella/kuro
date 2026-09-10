@@ -11,13 +11,9 @@ export async function loadOrCreateSeed(store: SecretStore, name: string, allowEp
     throw new TransportSecretError('Transport requires os-protected secret storage', protection);
   }
   const existing = await store.read(name);
-  if (existing !== null) {
-    if (existing.byteLength !== 32) throw new TransportSecretError('Transport seed has invalid length', protection);
-    return new Uint8Array(existing);
-  }
-  const seed = new Uint8Array(randomBytes(32));
-  await store.write(name, seed);
-  return seed;
+  const seed = existing ?? await store.createIfAbsent(name, new Uint8Array(randomBytes(32)));
+  if (!(seed instanceof Uint8Array) || seed.byteLength !== 32) throw new TransportSecretError('Transport seed has invalid length', protection);
+  return new Uint8Array(seed);
 }
 
 /** Deliberately named test-only secret store; it must be opted into by the transport constructor. */
@@ -31,5 +27,8 @@ export class InMemorySecretStore implements SecretStore {
     const value = this.#values.get(name);
     return value === undefined ? null : new Uint8Array(value);
   }
-  async write(name: string, secret: Uint8Array): Promise<void> { this.#values.set(name, new Uint8Array(secret)); }
+  async createIfAbsent(name: string, candidate: Uint8Array): Promise<Uint8Array> {
+    if (!this.#values.has(name)) this.#values.set(name, new Uint8Array(candidate));
+    return new Uint8Array(this.#values.get(name)!);
+  }
 }

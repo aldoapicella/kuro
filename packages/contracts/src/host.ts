@@ -28,7 +28,9 @@ export type SecretProtection = 'os-protected' | 'ephemeral-test' | 'unavailable'
 export interface SecretStore {
   protection(): Promise<SecretProtection>;
   read(name: string): Promise<Uint8Array | null>;
-  write(name: string, secret: Uint8Array): Promise<void>;
+  /** Atomically creates only if absent, across host processes. Returns the durably stored value,
+   * including the existing winner of a concurrent creation. Never overwrites an identity. */
+  createIfAbsent(name: string, candidate: Uint8Array): Promise<Uint8Array>;
 }
 export interface SelectedText {
   bytes: Uint8Array;

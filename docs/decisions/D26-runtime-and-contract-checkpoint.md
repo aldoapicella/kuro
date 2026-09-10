@@ -24,6 +24,8 @@ Request TTL is `1..86400` seconds from original local admission/sending, never f
 
 `TransportPort.send` resolves on transport acceptance only. `SecretStore` must report protected storage; production rejects unavailable and Linux `basic_text`. Ephemeral test storage is explicitly identified and requires deliberate test configuration. The transport accepts only specified keys and bounded exact bytes. No model or database dependency belongs there.
 
+The final review replaces unconditional `SecretStore.write` with mandatory `createIfAbsent(name, candidate)`. The host must atomically create across processes, never overwrite a pre-existing identity, and return the durable winning bytes before resolving. A read followed by an unconditional write or a process-local mutex does not satisfy this contract. All current in-memory/test consumers migrate in the same checkpoint; the independently developed OS secret adapter must implement this primitive. Concurrent startup tests verify both callers use the stored winner. No wire or AI contract changes are involved.
+
 `Result<T>` distinguishes success from public typed errors. Retryable errors are enumerated in contracts; retry does not authorize work or reset validity. Stale, denied, expired and cancelled operations require current authorization and new admission/review as appropriate. Error messages and committed-state notifications contain no confidential payloads. Events are refresh hints; `getState` and authorized entity reads are authoritative.
 
 ### Explicit authority-loss recovery
