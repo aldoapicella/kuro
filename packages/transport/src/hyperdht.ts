@@ -44,6 +44,7 @@ export class HyperDhtTransport implements TransportPort {
   #startPromise: Promise<{ publicKey: string }> | null = null;
   #startTimeout: NodeJS.Timeout | null = null;
   #generation = 0;
+  #stopPromise: Promise<void> | null = null;
 
   constructor(options: HyperDhtTransportOptions) {
     for (const peerKey of options.pairedPeers ?? []) this.assertKey(peerKey), this.#pairs.add(peerKey);
@@ -63,6 +64,8 @@ export class HyperDhtTransport implements TransportPort {
   }
 
   async start(): Promise<{ publicKey: string }> {
+    const stopping = this.#stopPromise;
+    if (stopping !== null) await stopping;
     if (this.#publicKey !== null) return { publicKey: this.#publicKey };
     if (this.#startPromise !== null) return this.#startPromise;
     const generation = ++this.#generation;
@@ -77,12 +80,25 @@ export class HyperDhtTransport implements TransportPort {
     try { return await promise; } finally { if (this.#startPromise === promise) this.#startPromise = null; }
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.#stopPromise !== null) return this.#stopPromise;
+    const stopping = this.stopWorker();
+    this.#stopPromise = stopping;
+    void stopping.then(
+      () => { if (this.#stopPromise === stopping) this.#stopPromise = null; },
+      () => { if (this.#stopPromise === stopping) this.#stopPromise = null; },
+    );
+    return stopping;
+  }
+
+  private async stopWorker(): Promise<void> {
     ++this.#generation;
     const worker = this.#worker;
     this.#worker = null;
     this.#publicKey = null;
     this.rejectStart(new Error('Transport stopped during start'));
+    for (const pending of this.#pending.values()) pending.reject(new Error('Transport stopped'));
+    this.#pending.clear();
     if (worker === null) return;
     const stopped = new Promise<void>((resolve) => {
       const timeout = setTimeout(() => { void worker.terminate().finally(resolve); }, this.#options.shutdownTimeoutMs);
@@ -91,8 +107,6 @@ export class HyperDhtTransport implements TransportPort {
     });
     worker.postMessage({ type: 'stop' } satisfies ToWorker);
     await stopped;
-    for (const pending of this.#pending.values()) pending.reject(new Error('Transport stopped'));
-    this.#pending.clear();
   }
 
   async send(peerKey: string, bytes: Uint8Array): Promise<void> {
