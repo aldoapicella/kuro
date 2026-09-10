@@ -1,0 +1,33 @@
+# D26 — Runtime and integration contract checkpoint
+
+The initial application workspace uses strict TypeScript 5.9.3, ESM, Node 24.19.0 and pnpm 11.19.0 with one root lockfile. No existing application toolchain was replaced. Package exports currently point to TypeScript sources for `tsx` development composition; the desktop build must bundle these public exports. Root `pnpm build` also emits JavaScript and declarations under ignored `dist/`.
+
+The selected internal storage adapter is `node:sqlite` `DatabaseSync`. The September 10, 2026 macOS arm64 probe reports Node 24.19.0, SQLite 3.53.3, working FTS5, enforced foreign keys and disk close/reopen. `pnpm probe:host` is independently runnable. The database stays behind the core's private adapter; contracts expose no database handles. No speculative database backends or SQLite native addon are installed.
+
+This result does **not** establish Electron compatibility. The desktop contributor must run `scripts/probe-host.mjs` with the chosen Electron executable/main process and record its embedded Node version. The host must also demonstrate the suspend/resume authorization barrier using `CoreLifecyclePort.suspend` synchronously before content callbacks can run and `resume` only after trustworthy clock establishment. A best-effort Electron resume event alone does not meet B14. The core remains closed when the host cannot establish that barrier. See [Node SQLite documentation](https://nodejs.org/docs/latest-v24.x/api/sqlite.html) and [Electron powerMonitor](https://www.electronjs.org/docs/latest/api/power-monitor).
+
+## Frozen v1 encodings
+
+All random entity IDs and space aliases contain 128 cryptographic random bits encoded as 32 lowercase hexadecimal characters; keys and SHA-256 digests use 64 lowercase hexadecimal characters. `originKey` is the source custodian's authenticated public key. All references carry immutable version-specific half-open UTF-8 byte offsets. Passage bytes exactly cover their offsets. Local source hashes and paths never enter the protocol.
+
+The five evidence messages use recursively lexicographically sorted JSON object keys, compact JSON, original Unicode and newline content, no trailing newline, and SHA-256 over exact body bytes excluding the four-byte big-endian frame prefix. The D25 state digest keeps its pre-existing mandated property and array ordering. Its JSON Schema remains the structural authority. Existing D25 fixture body hashes refer to those fixture bytes; encoders need not reproduce their whitespace. Senders store and retry the actual serialized body unchanged. Duplicate keys, unknown fields, malformed UTF-8 and unsupported versions are rejected.
+
+`SEARCH_REQUEST.audienceKey` names the explicitly selected custodian; both cores compare it against the authenticated destination. A response has no self-referential digest; its local stored body digest and `RESPONSE_ACK.bodyDigest` hash its exact bytes. ACK correlation also includes authenticated peer, request ID, response ID and bound alias. `CLOSED` carries only version, type, request ID and alias. It has no disclosure reason.
+
+Request TTL is `1..86400` seconds from original local admission/sending, never from a retry. Receiver evidence expiry is the minimum of first durable receipt plus `conditions.validForSeconds * 1000` and non-null `conditions.notAfterMs`. Monotonic deadlines additionally narrow live process validity. Unsupported/missing conditions reject receipt or synthesis; forwarding is always forbidden. Approval cannot outlive request/review/source validity. Positive shared-space caches obey D25's original-send dual deadlines and startup/lifecycle invalidation independently of evidence validity.
+
+## Ports and local state
+
+`AppPort` is bound to the trusted host's `SessionPort`. Every local command has a strict schema in `AppCommands`; there is no renderer-selected actor or generic network dispatcher. Owner enrollment and authority pairing consume single-use verified setup tokens through `VerifiedPairingPort`. Peer keys and aliases may be registered only after trusted verification. Shared administration and custodian-local policy commands are distinct. Creating a space or assigning an owner never implies content rights; capabilities and local actions are explicit arguments.
+
+`AiPort` reports explicit QVAC or simulated capabilities. It embeds identified blocks, ranks only supplied authorized vectors and prepares/executes exact manifests. A generation preparation includes the fixed public envelope, exact question, selected sources, omitted references, all metadata, budget and digest. The core verifies the complete source partition. No hidden history/tools are permitted. Generated claims use local source aliases; the core reconstructs literal quotes and keeps results as private drafts requiring semantic review. The model-free evidence view is separate.
+
+`TransportPort.send` resolves on transport acceptance only. `SecretStore` must report protected storage; production rejects unavailable and Linux `basic_text`. Ephemeral test storage is explicitly identified and requires deliberate test configuration. The transport accepts only specified keys and bounded exact bytes. No model or database dependency belongs there.
+
+`Result<T>` distinguishes success from public typed errors. Retryable errors are enumerated in contracts; retry does not authorize work or reset validity. Stale, denied, expired and cancelled operations require current authorization and new admission/review as appropriate. Error messages and committed-state notifications contain no confidential payloads. Events are refresh hints; `getState` and authorized entity reads are authoritative.
+
+## Validation and provenance
+
+The checkpoint runs `pnpm typecheck`, `pnpm build`, `pnpm test:contracts`, and `pnpm probe:host`. Fixtures under `fixtures/contracts/v1/` are synthetic. Stateful policy/transport tests follow in their modules; contract acceptance is not proof of authentication or freshness.
+
+Dependencies authored elsewhere: Zod 4.6.1 (MIT) for strict local/AI/evidence DTOs, Ajv 8.20.0 (MIT) for the existing D25 JSON Schema, and `@noble/hashes` 2.4.0 (MIT) for portable SHA-256. TypeScript 5.9.3 (Apache-2.0), tsx 4.23.13 (MIT), and Node type definitions 24.13.4 (MIT) are development dependencies. Project protocol/domain implementation is newly authored; no reference implementation was copied.

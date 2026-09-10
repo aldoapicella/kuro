@@ -1,0 +1,19 @@
+{
+  "name": "kuro-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": { "node": ">=24.19.0 <25" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:contracts": "node --import tsx --test packages/contracts/test/*.test.ts",
+    "probe:host": "node scripts/probe-host.mjs",
+    "test:reference": "python3 -m unittest discover -s verification -v"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}

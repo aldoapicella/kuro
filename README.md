@@ -31,7 +31,7 @@ python3 verification/run_checks.py
 
 Repository access requires an authorized GitHub account. The reference checks use the Python standard library. Use Python 3.12 for the development tooling; see [Graphify setup](docs/development/graphify.md) for an isolated installation.
 
-Application build commands and dependency versions will be established when the runtime compatibility checks pass. The module directories currently document their intended boundaries and are not installable packages.
+The shared TypeScript contract workspace uses Node 24.19.0 and pnpm 11.19.0. Run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm build`, `pnpm test:contracts`, and `pnpm probe:host` from the root. The host probe checks actual SQLite/FTS5 and disk reopen support. Terminal Node results do not establish Electron compatibility. See [D26](docs/decisions/D26-runtime-and-contract-checkpoint.md) for the public integration checkpoint and remaining host checks.
 
 ## Repository structure
 
@@ -64,6 +64,7 @@ The following pre-existing material forms the initial base of this submission:
 - The architecture draws on official QVAC, Pear, Electron, and SQLite documentation and public companion materials for *Generative AI Design Patterns* and *Building Applications with AI Agents*. Sources are listed in the architecture. Implementations from those books' repositories have not been incorporated.
 - Graphify is third-party development tooling from [Graphify Labs](https://github.com/Graphify-Labs/graphify), distributed as `graphifyy`. Its pinned installation and local integration are documented separately. No Graphify source, third-party skill bundle, model weights, or generated graph is vendored into KURO.
 - The space-state schema checker uses [python-jsonschema](https://github.com/python-jsonschema/jsonschema) 4.26.0 (MIT) as an isolated development dependency. KURO's D25 schemas, synthetic fixtures, and checking script were authored for this project; no authorization or transport implementation is supplied by that validator.
+- The callable contract checkpoint adds Zod 4.6.1, Ajv 8.20.0 and `@noble/hashes` 2.4.0 (MIT); TypeScript 5.9.3 (Apache-2.0), tsx 4.23.13 and Node type definitions 24.13.4 (MIT) support development. These libraries provide validation, hashing and compilation, not KURO authorization. Application protocol source and synthetic conformance fixtures are newly authored. One root pnpm lockfile pins dependencies.
 
 Record the origin, version, and applicable license of any additional code, templates, models, or examples introduced during implementation. This repository remains private; no open-source license has been selected for KURO.
 

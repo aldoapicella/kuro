@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kuro:evidence:v1",
+  "title": "KURO v1 evidence messages",
+  "description": "Runtime source is packages/contracts/src/wire.ts. This schema records the discriminated evidence wire surface.",
+  "oneOf": [
+    { "$ref": "#/$defs/searchRequest" }, { "$ref": "#/$defs/received" }, { "$ref": "#/$defs/approvedResponse" }, { "$ref": "#/$defs/responseAck" }, { "$ref": "#/$defs/closed" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "key": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "base": { "type": "object", "required": ["v", "type", "requestId", "spaceAlias"], "properties": { "v": { "const": 1 }, "requestId": { "$ref": "#/$defs/id" }, "spaceAlias": { "$ref": "#/$defs/id" } } },
+    "searchRequest": { "allOf": [{ "$ref": "#/$defs/base" }], "type": "object", "additionalProperties": false, "required": ["ttlSeconds", "query", "audienceKey"], "properties": { "v": { "const": 1 }, "type": { "const": "SEARCH_REQUEST" }, "requestId": { "$ref": "#/$defs/id" }, "spaceAlias": { "$ref": "#/$defs/id" }, "ttlSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 }, "query": { "type": "string", "maxLength": 2048 }, "audienceKey": { "$ref": "#/$defs/key" } } },
+    "received": { "type": "object", "additionalProperties": false, "required": ["v", "type", "requestId", "spaceAlias"], "properties": { "v": { "const": 1 }, "type": { "const": "RECEIVED" }, "requestId": { "$ref": "#/$defs/id" }, "spaceAlias": { "$ref": "#/$defs/id" } } },
+    "approvedResponse": { "type": "object", "additionalProperties": false, "required": ["v", "type", "requestId", "responseId", "spaceAlias", "passages", "conditions"], "properties": { "v": { "const": 1 }, "type": { "const": "APPROVED_RESPONSE" }, "requestId": { "$ref": "#/$defs/id" }, "responseId": { "$ref": "#/$defs/id" }, "spaceAlias": { "$ref": "#/$defs/id" }, "passages": { "type": "array", "minItems": 1, "maxItems": 6 }, "conditions": { "type": "object" } } },
+    "responseAck": { "type": "object", "additionalProperties": false, "required": ["v", "type", "requestId", "responseId", "spaceAlias", "bodyDigest"], "properties": { "v": { "const": 1 }, "type": { "const": "RESPONSE_ACK" }, "requestId": { "$ref": "#/$defs/id" }, "responseId": { "$ref": "#/$defs/id" }, "spaceAlias": { "$ref": "#/$defs/id" }, "bodyDigest": { "$ref": "#/$defs/key" } } },
+    "closed": { "type": "object", "additionalProperties": false, "required": ["v", "type", "requestId", "spaceAlias"], "properties": { "v": { "const": 1 }, "type": { "const": "CLOSED" }, "requestId": { "$ref": "#/$defs/id" }, "spaceAlias": { "$ref": "#/$defs/id" } } }
+  }
+}
