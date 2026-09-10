@@ -26,6 +26,12 @@ Request TTL is `1..86400` seconds from original local admission/sending, never f
 
 `Result<T>` distinguishes success from public typed errors. Retryable errors are enumerated in contracts; retry does not authorize work or reset validity. Stale, denied, expired and cancelled operations require current authorization and new admission/review as appropriate. Error messages and committed-state notifications contain no confidential payloads. Events are refresh hints; `getState` and authorized entity reads are authoritative.
 
+### Explicit authority-loss recovery
+
+`replaceAuthority` consumes a trusted, single-use authority verification token naming a new shared space ID and a different pinned authority key. It compares the old local policy epoch and bound local administrator session. Recovery remains available when old shared permissions have expired. It permanently tombstones the old namespace, retains its counter high-water marks and provenance, and remaps a copy of local snapshots and restrictions without moving old approvals, deliveries, manifests or index generations. New indexing and review are required. Local policy copied into the new space remains bounded by newly synchronized membership/capabilities.
+
+For recovery on the owner installation, the host must first provision a separate protected identity and reopen the core with its new transport public key. The verified new authority key must equal that local key; owner capabilities and local actions are explicit. There is no wire command or automatic transport-key rotation. Participant installations verify and pair that new owner namespace through their host setup channel. Existing high-water marks are never reset under the old tuple, and a tombstoned namespace cannot issue or install future state. This additive command affects AppPort consumers only; wire v1 and AiPort are unchanged.
+
 ## Validation and provenance
 
 The checkpoint runs `pnpm typecheck`, `pnpm build`, `pnpm test:contracts`, and `pnpm probe:host`. Fixtures under `fixtures/contracts/v1/` are synthetic. Stateful policy/transport tests follow in their modules; contract acceptance is not proof of authentication or freshness.

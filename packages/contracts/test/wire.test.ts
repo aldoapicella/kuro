@@ -23,7 +23,11 @@ test("five evidence fixtures have pinned canonical wire bytes and digests", asyn
 test("D25 fixtures use the normative schema and mandated state digest", async () => {
   const valid = ["request.json", "active.json", "renewal.json", "denied.json"];
   const invalid = ["invalid-extra-field.json", "invalid-lease.json", "invalid-denial.json", "invalid-capability.json"];
-  for (const name of valid) validateWire(await body(`space-state/${name}`));
+  for (const name of valid) {
+    const value = await body(`space-state/${name}`);
+    validateWire(value);
+    assert.deepEqual(decodeWire(encodeWire(value as never)), value, name);
+  }
   for (const name of invalid) {
     const value = await body(`space-state/${name}`);
     assert.throws(() => validateWire(value), name);

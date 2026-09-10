@@ -58,6 +58,7 @@ export type StateView = z.infer<typeof StateViewSchema>;
 export const AppCommands = {
   createSpace: z.strictObject({ capabilities, localActions: capabilities }),
   pairSpace: z.strictObject({ selectionId: IDSchema, localActions: capabilities }),
+  replaceAuthority: z.strictObject({ oldSpaceId: IDSchema, selectionId: IDSchema, expectedRevision: revision, capabilities, localActions: capabilities }),
   enrollMember: z.strictObject({ spaceId: IDSchema, selectionId: IDSchema, capabilities, validUntilMs: validity, expectedRevision: revision }),
   setMember: z.strictObject({ spaceId: IDSchema, memberId: IDSchema, active: z.boolean(), capabilities, validUntilMs: validity, expectedRevision: revision }),
   setRelationship: z.strictObject({ spaceId: IDSchema, memberId: IDSchema, otherMemberId: IDSchema, allowed: z.boolean(), validUntilMs: validity, expectedRevision: revision }),
@@ -81,7 +82,7 @@ export const AppCommands = {
 export type AppCommandName = keyof typeof AppCommands;
 export type AppInput<K extends AppCommandName> = z.infer<(typeof AppCommands)[K]>;
 export interface AppOutputs {
-  createSpace: SpaceView; pairSpace: SpaceView; enrollMember: SpaceView; setMember: SpaceView;
+  createSpace: SpaceView; pairSpace: SpaceView; replaceAuthority: SpaceView; enrollMember: SpaceView; setMember: SpaceView;
   setRelationship: SpaceView; pairPeer: null; refreshSpace: { requestId: string };
   setLocalPolicy: SpaceView; setDocumentRules: { revision: number };
   importText: { documentId: string; versionId: string; jobId: string; revision: number };

@@ -85,7 +85,7 @@ class Parser {
   private object(depth: number): Record<string, unknown> {
     this.#index++;
     this.space();
-    const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
     const keys = new Set<string>();
     if (this.take("}")) return result;
     while (true) {
@@ -97,7 +97,7 @@ class Parser {
       this.space();
       if (!this.take(":")) this.fail("expected colon");
       this.space();
-      result[key] = this.value(depth);
+      Object.defineProperty(result, key, { value: this.value(depth), enumerable: true, writable: true, configurable: true });
       this.space();
       if (this.take("}")) return result;
       if (!this.take(",")) this.fail("expected comma");
