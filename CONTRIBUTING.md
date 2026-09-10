@@ -1,6 +1,6 @@
 # Contributing to KURO
 
-Start with the shared [agent instructions](AGENTS.md), [engineering baseline](docs/development/engineering-baseline.md), and relevant [architecture](docs/architecture.md) sections. The baseline defines ownership, the shared contract checkpoint, public semantics, and acceptance criteria. This repository currently contains design documentation, module boundaries, and a Python reference model. The application adapters remain to be implemented.
+Start with the shared [agent instructions](AGENTS.md), [engineering baseline](docs/development/engineering-baseline.md), and relevant [architecture](docs/architecture.md) sections. The baseline defines ownership, contracts and acceptance criteria. The TypeScript contracts, custody core and Node HyperDHT adapter are implemented alongside the Python design reference. Desktop and QVAC adapters integrate through the public ports.
 
 ## Module boundaries
 
@@ -10,7 +10,7 @@ Start with the shared [agent instructions](AGENTS.md), [engineering baseline](do
 - The transport provides authenticated peer identity and bytes. It does not read the corpus or rebuild approved payloads.
 - Shared contracts have runtime validation as well as TypeScript types. Real adapters and test doubles must satisfy the same observable contract.
 
-Shared-space membership, verified device bindings, coarse capabilities, and discoverable peer relationships belong to the one pinned owner authority. Custodian-local policy authorities retain document grants, restrictions, reviewer rights, and denials, and may only narrow the shared ceiling. Use the two direct-authenticated state messages and freshness rules from [D25](docs/decisions/D25-shared-space-authority.md); runtime implementation remains planned.
+Shared-space membership, verified device bindings, coarse capabilities and relationships belong to the pinned owner authority. Local policy authorities retain document grants, restrictions, reviewer rights and denials, and may only narrow the shared ceiling. Use the implemented direct-authenticated messages and freshness rules from [D25](docs/decisions/D25-shared-space-authority.md).
 
 ## Changes and dependencies
 
@@ -32,7 +32,7 @@ This writes a generated local record to `verification/results.json`, which is ig
 python3 -m unittest discover -s verification -v
 ```
 
-Application tests must be added with their implementations. Reference-model tests and mock-backed harnesses do not prove that QVAC, Pear, Electron, or cross-device operation works.
+Run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm probe:host`, and `pnpm --filter @kuro/transport-harness smoke`. The [handoff](docs/development/core-transport-handoff.md) maps these checks to requirements. Scoped GitHub Actions cover Linux and macOS; local results do not claim a hosted workflow has run. Reference tests and simulations do not prove QVAC, Electron or physical cross-device operation.
 
 Validate the D25 structural schema and synthetic fixtures with an isolated development dependency:
 
