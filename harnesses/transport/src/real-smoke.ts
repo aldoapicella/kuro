@@ -7,26 +7,26 @@ import HyperDHT from 'hyperdht';
 import { runTransportConformance, type TransportConformanceResult } from '@kuro/transport';
 import type { TransportEvent, TransportPort } from '@kuro/contracts';
 
-interface PeerEvent { type: string; publicKey?: string; peerKey?: string; bytesHex?: string }
-interface ProcessConfig { bootstrap: { host: string; port: number }[]; seedHex: string; pairedPeers: string[]; holdMessages?: boolean }
+interface PeerEvent { type: string; publicKey?: string; peerKey?: string; bytesHex?: string; code?: string }
+interface ProcessConfig { bootstrap: { host: string; port: number }[]; seedHex: string; pairedPeers: string[]; port: number; holdMessages?: boolean }
 interface SendWaiter { resolve(event: PeerEvent): void; reject(error: Error): void; timer: NodeJS.Timeout }
 
 async function main(): Promise<void> {
   const bootstrapper = HyperDHT.bootstrapper(await reserveUdpPort(), '127.0.0.1');
   await bootstrapper.fullyBootstrapped();
   const bootstrap = [{ host: '127.0.0.1', port: bootstrapper.address().port }];
-  const router = new HyperDHT({ bootstrap, ephemeral: false, host: '127.0.0.1', firewalled: false });
+  const router = new HyperDHT({ bootstrap, port: await reserveUdpPort(), ephemeral: false, host: '127.0.0.1', firewalled: false });
   await router.fullyBootstrapped();
   const seedA = randomBytes(32); const seedB = randomBytes(32);
   const keyA = Buffer.from(HyperDHT.keyPair(seedA).publicKey).toString('hex');
   const keyB = Buffer.from(HyperDHT.keyPair(seedB).publicKey).toString('hex');
-  const left = new PeerProcess({ bootstrap, seedHex: seedA.toString('hex'), pairedPeers: [keyB] });
-  const right = new PeerProcess({ bootstrap, seedHex: seedB.toString('hex'), pairedPeers: [keyA], holdMessages: true });
+  const left = new PeerProcess({ bootstrap, port: await reserveUdpPort(), seedHex: seedA.toString('hex'), pairedPeers: [keyB] });
+  const right = new PeerProcess({ bootstrap, port: await reserveUdpPort(), seedHex: seedB.toString('hex'), pairedPeers: [keyA], holdMessages: true });
   try {
     await Promise.all([left.wait('ready'), right.wait('ready')]);
     const result: TransportConformanceResult = await runTransportConformance({
       sender: new ChildTransport(left, keyA), recipient: new ChildTransport(right, keyB), senderKey: keyA, recipientKey: keyB,
-      reconnectRecipient: () => right.restart(), afterReconnect: () => left.restart(), releaseRecipientObservation: () => right.release(), timeoutMs: 10_000,
+      reconnectRecipient: () => right.restart(), releaseRecipientObservation: () => right.release(), timeoutMs: 10_000,
     });
     process.stdout.write(`real HyperDHT two-process conformance passed (${result.deliveries} D25 protocol messages)\n`);
   } finally {
@@ -51,6 +51,7 @@ class PeerProcess {
   #child: ChildProcess;
   readonly #config: ProcessConfig;
   readonly #events: PeerEvent[] = [];
+  readonly #context: string[] = [];
   readonly #waiters = new Map<string, Array<(event: PeerEvent) => void>>();
   readonly #sendWaiters: SendWaiter[] = [];
   readonly #listeners = new Set<(event: TransportEvent) => void>();
@@ -68,7 +69,7 @@ class PeerProcess {
     const index = this.#events.findIndex((event) => event.type === type);
     if (index >= 0) return Promise.resolve(this.#events.splice(index, 1)[0]!);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Timed out waiting for peer ${type}`)), timeoutMs);
+      const timer = setTimeout(() => reject(new Error(`Timed out waiting for peer ${type}; ${this.context()}`)), timeoutMs);
       const waiters = this.#waiters.get(type) ?? [];
       waiters.push((event) => { clearTimeout(timer); resolve(event); }); this.#waiters.set(type, waiters);
     });
@@ -77,7 +78,7 @@ class PeerProcess {
     const index = this.#events.findIndex((event) => event.type === 'sent' || event.type === 'rejected');
     if (index >= 0) return Promise.resolve(this.#events.splice(index, 1)[0]!);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Timed out waiting for peer send outcome')), timeoutMs);
+      const timer = setTimeout(() => reject(new Error(`Timed out waiting for peer send outcome; ${this.context()}`)), timeoutMs);
       this.#sendWaiters.push({ resolve, reject, timer });
     });
   }
@@ -98,11 +99,23 @@ class PeerProcess {
       const delivery: TransportEvent = { type: 'message', peerKey: event.peerKey, bytes: Buffer.from(event.bytesHex, 'hex') };
       for (const listener of this.#listeners) { try { listener(delivery); } catch { /* A harness observer cannot stop the peer. */ } }
     }
+    const lifecycle = this.transportEvent(event);
+    if (lifecycle !== null) {
+      this.#context.push(lifecycle.type === 'error' ? `error:${lifecycle.code}` : `${lifecycle.type}:${lifecycle.peerKey}`);
+      if (this.#context.length > 8) this.#context.shift();
+      for (const listener of this.#listeners) { try { listener(lifecycle); } catch { /* A harness observer cannot stop the peer. */ } }
+    }
     const sendWaiter = (event.type === 'sent' || event.type === 'rejected') ? this.#sendWaiters.shift() : undefined;
     if (sendWaiter !== undefined) { clearTimeout(sendWaiter.timer); sendWaiter.resolve(event); return; }
     const waiter = this.#waiters.get(event.type)?.shift();
     if (waiter !== undefined) waiter(event); else this.#events.push(event);
   }
+  private transportEvent(event: PeerEvent): TransportEvent | null {
+    if ((event.type === 'connected' || event.type === 'disconnected') && event.peerKey !== undefined) return { type: event.type, peerKey: event.peerKey };
+    if (event.type === 'error' && (event.code === 'PEER_OFFLINE' || event.code === 'INVALID_MESSAGE' || event.code === 'CAPACITY_EXCEEDED')) return { type: 'error', code: event.code };
+    return null;
+  }
+  private context(): string { return this.#context.length === 0 ? 'no transport lifecycle events' : `transport events: ${this.#context.join(', ')}`; }
 }
 
 async function reserveUdpPort(): Promise<number> {

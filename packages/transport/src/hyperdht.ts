@@ -1,4 +1,4 @@
-import { Worker } from 'node:worker_threads';
+import { Worker, type WorkerOptions } from 'node:worker_threads';
 import { KeySchema, type SecretStore, type TransportEvent, type TransportPort } from '@kuro/contracts';
 import { MAX_FRAME_BYTES, validateBody } from './framing.js';
 import { loadOrCreateSeed } from './secrets.js';
@@ -9,6 +9,8 @@ export interface HyperDhtTransportOptions {
   /** The protected-store record. The seed is expanded with HyperDHT.keyPair(seed) in the worker. */
   secretName?: string;
   bootstrap: readonly WorkerBootstrap[];
+  /** Optional local UDP port for a host running multiple DHT peers. */
+  localPort?: number;
   pairedPeers?: Iterable<string>;
   maxConnections?: number;
   maxBufferedBytes?: number;
@@ -18,18 +20,22 @@ export interface HyperDhtTransportOptions {
   shutdownTimeoutMs?: number;
   /** Test-only escape hatch for InMemorySecretStore; production must omit it. */
   allowEphemeralTest?: boolean;
+  /** Test-only worker seam for bounded lifecycle tests. Production must omit it. */
+  workerFactory?: (url: URL, options: WorkerOptions) => Worker;
 }
 interface ResolvedOptions {
   secretStore: SecretStore;
   allowEphemeralTest: boolean;
   secretName: string;
   bootstrap: readonly WorkerBootstrap[];
+  localPort: number | undefined;
   maxConnections: number;
   maxBufferedBytes: number;
   maxQueuedSends: number;
   connectionTimeoutMs: number;
   startupTimeoutMs: number;
   shutdownTimeoutMs: number;
+  workerFactory: ((url: URL, options: WorkerOptions) => Worker) | undefined;
 }
 
 export class HyperDhtTransport implements TransportPort {
@@ -53,12 +59,14 @@ export class HyperDhtTransport implements TransportPort {
       allowEphemeralTest: options.allowEphemeralTest === true,
       secretName: options.secretName ?? 'kuro.transport.hyperdht.seed.v1',
       bootstrap: options.bootstrap.map((node) => ({ ...node })),
+      localPort: options.localPort,
       maxConnections: options.maxConnections ?? 16,
       maxBufferedBytes: options.maxBufferedBytes ?? MAX_FRAME_BYTES * 4,
       maxQueuedSends: options.maxQueuedSends ?? 32,
       connectionTimeoutMs: options.connectionTimeoutMs ?? 10_000,
       startupTimeoutMs: options.startupTimeoutMs ?? 10_000,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? 5_000,
+      workerFactory: options.workerFactory,
     };
     this.validateOptions();
   }
@@ -128,7 +136,7 @@ export class HyperDhtTransport implements TransportPort {
   removePair(peerKey: string): void { this.#pairs.delete(peerKey); this.#worker?.postMessage({ type: 'remove-pair', peerKey } satisfies ToWorker); }
 
   private workerConfig(seed: Uint8Array): WorkerConfig {
-    return { seed, bootstrap: this.#options.bootstrap, pairedPeers: [...this.#pairs], maxConnections: this.#options.maxConnections, maxBufferedBytes: this.#options.maxBufferedBytes, maxQueuedSends: this.#options.maxQueuedSends, connectionTimeoutMs: this.#options.connectionTimeoutMs };
+    return { seed, bootstrap: this.#options.bootstrap, port: this.#options.localPort, pairedPeers: [...this.#pairs], maxConnections: this.#options.maxConnections, maxBufferedBytes: this.#options.maxBufferedBytes, maxQueuedSends: this.#options.maxQueuedSends, connectionTimeoutMs: this.#options.connectionTimeoutMs };
   }
   private async startWorker(generation: number): Promise<void> {
     try {
@@ -136,7 +144,7 @@ export class HyperDhtTransport implements TransportPort {
       if (!this.isStarting(generation)) return;
       const workerUrl = import.meta.url.endsWith('.ts') ? new URL('./hyperdht-worker.ts', import.meta.url) : new URL('./hyperdht-worker.js', import.meta.url);
       const workerOptions = workerUrl.pathname.endsWith('.ts') ? { workerData: this.workerConfig(seed), execArgv: ['--import', 'tsx'] } : { workerData: this.workerConfig(seed) };
-      const worker = new Worker(workerUrl, workerOptions);
+      const worker = this.#options.workerFactory?.(workerUrl, workerOptions) ?? new Worker(workerUrl, workerOptions);
       if (!this.isStarting(generation)) { void worker.terminate(); return; }
       this.#worker = worker;
       worker.on('message', (message: FromWorker) => { if (this.#worker === worker) this.onWorkerMessage(worker, message); });
@@ -178,6 +186,7 @@ export class HyperDhtTransport implements TransportPort {
   private assertKey(key: string): void { if (!KeySchema.safeParse(key).success) throw new Error('Invalid paired peer key'); }
   private validateOptions(): void {
     for (const node of this.#options.bootstrap) if (typeof node.host !== 'string' || node.host.length === 0 || !Number.isInteger(node.port) || node.port < 1 || node.port > 65_535) throw new Error('Invalid HyperDHT bootstrap node');
+    if (this.#options.localPort !== undefined && (!Number.isInteger(this.#options.localPort) || this.#options.localPort < 1 || this.#options.localPort > 65_535)) throw new Error('Invalid HyperDHT local port');
     for (const value of [this.#options.maxConnections, this.#options.maxQueuedSends]) if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid HyperDHT capacity limit');
     if (!Number.isSafeInteger(this.#options.maxBufferedBytes) || this.#options.maxBufferedBytes < MAX_FRAME_BYTES) throw new Error('Invalid HyperDHT receive buffer limit');
     for (const value of [this.#options.connectionTimeoutMs, this.#options.startupTimeoutMs, this.#options.shutdownTimeoutMs]) if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid HyperDHT timeout');

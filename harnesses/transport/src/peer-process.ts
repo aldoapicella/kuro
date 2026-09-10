@@ -1,16 +1,20 @@
 import { createInterface } from 'node:readline';
 import { InMemorySecretStore, HyperDhtTransport } from '@kuro/transport';
 
-interface ProcessConfig { bootstrap: { host: string; port: number }[]; seedHex: string; pairedPeers: string[]; holdMessages?: boolean }
+interface ProcessConfig { bootstrap: { host: string; port: number }[]; seedHex: string; pairedPeers: string[]; port: number; holdMessages?: boolean }
 const config = JSON.parse(process.env.KURO_TRANSPORT_CONFIG ?? '') as ProcessConfig;
 const secret = new InMemorySecretStore('ephemeral-test', new Map([['smoke-seed', Buffer.from(config.seedHex, 'hex')]]));
-const transport = new HyperDhtTransport({ secretStore: secret, secretName: 'smoke-seed', allowEphemeralTest: true, bootstrap: config.bootstrap, pairedPeers: config.pairedPeers });
+const transport = new HyperDhtTransport({ secretStore: secret, secretName: 'smoke-seed', allowEphemeralTest: true, bootstrap: config.bootstrap, localPort: config.port, pairedPeers: config.pairedPeers });
 const heldMessages: Array<{ peerKey: string; bytesHex: string }> = [];
 let releaseMessages = config.holdMessages !== true;
 transport.subscribe((event) => {
-  if (event.type !== 'message') return;
-  const message = { peerKey: event.peerKey, bytesHex: Buffer.from(event.bytes).toString('hex') };
-  if (!releaseMessages) heldMessages.push(message); else output({ type: 'message', ...message });
+  if (event.type === 'message') {
+    const message = { peerKey: event.peerKey, bytesHex: Buffer.from(event.bytes).toString('hex') };
+    if (!releaseMessages) heldMessages.push(message); else output({ type: 'message', ...message });
+    return;
+  }
+  if (event.type === 'connected' || event.type === 'disconnected') output({ type: event.type, peerKey: event.peerKey });
+  if (event.type === 'error') output({ type: 'error', code: event.code });
 });
 const started = await transport.start();
 output({ type: 'ready', publicKey: started.publicKey });

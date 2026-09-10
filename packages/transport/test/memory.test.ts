@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { encodeWire, type SecretStore } from '@kuro/contracts';
-import { FrameDecoder, HyperDhtTransport, InMemorySecretStore, MemoryNetwork, MemoryTransport, encodeFrame, loadOrCreateSeed, runTransportConformance, validateBody } from '../src/index.js';
+import { encodeWire, type SecretStore, type TransportPort } from '@kuro/contracts';
+import { FrameDecoder, HyperDhtTransport, InMemorySecretStore, MemoryNetwork, MemoryTransport, encodeFrame, loadOrCreateSeed, runTransportConformance, spaceStateRequestBytes, validateBody } from '../src/index.js';
 
 const authority = 'a'.repeat(64);
 const recipient = 'b'.repeat(64);
@@ -15,6 +15,51 @@ test('memory provider runs the shared D25 ACTIVE response conformance suite', as
   const result = await runTransportConformance({ sender: left, recipient: right, senderKey: authority, recipientKey: recipient, releaseAuthorityObservation: () => network.flush(), releaseRecipientObservation: () => network.flush(), reconnectRecipient: async () => { await right.stop(); await right.start(); } });
   assert.equal(result.deliveries, 5);
   await left.stop(); await right.stop();
+});
+
+test('conformance retries a lost request and ignores a delayed old request after reconnect', async () => {
+  const network = new MemoryNetwork({ loss: true });
+  const left = new MemoryTransport({ network, publicKey: authority, pairedPeers: [recipient] });
+  const right = new MemoryTransport({ network, publicKey: recipient, pairedPeers: [authority] });
+  const authorityMessages: Uint8Array[] = [];
+  left.subscribe((event) => { if (event.type === 'message') authorityMessages.push(event.bytes); });
+  await left.start(); await right.start();
+  let authorityReleases = 0;
+  const result = await runTransportConformance({
+    sender: left, recipient: right, senderKey: authority, recipientKey: recipient, timeoutMs: 1_000,
+    releaseAuthorityObservation: () => {
+      network.flush();
+      if (++authorityReleases === 1) network.setFaults({});
+    },
+    releaseRecipientObservation: () => network.flush(),
+    reconnectRecipient: async () => { await right.stop(); await right.start(); },
+    afterReconnect: async () => {
+      // This is a late copy of the first correlated request. It must not satisfy requestId 6.
+      await right.send(authority, spaceStateRequestBytes('1'.repeat(32)));
+      network.flush();
+    },
+  });
+  assert.equal(result.deliveries, 5);
+  const oldRequest = spaceStateRequestBytes('1'.repeat(32));
+  const freshRequest = spaceStateRequestBytes('6'.repeat(32));
+  assert.ok(authorityMessages.filter((bytes) => Buffer.from(bytes).equals(Buffer.from(oldRequest))).length >= 2, 'lost request was not retried with identical bytes');
+  assert.equal(authorityMessages.filter((bytes) => Buffer.from(bytes).equals(Buffer.from(freshRequest))).length, 1);
+  await left.stop(); await right.stop();
+});
+
+test('conformance permits delivery before send resolves when observation is not explicitly held', async () => {
+  const network = new MemoryNetwork();
+  const left = new MemoryTransport({ network, publicKey: authority, pairedPeers: [recipient] });
+  const right = new MemoryTransport({ network, publicKey: recipient, pairedPeers: [authority] });
+  const immediate = (peer: MemoryTransport): TransportPort => ({
+    start: () => peer.start(), stop: () => peer.stop(), subscribe: listener => peer.subscribe(listener),
+    async send(key, bytes) { await peer.send(key, bytes); network.flush(); },
+  });
+  await left.start(); await right.start();
+  try {
+    const result = await runTransportConformance({ sender: immediate(left), recipient: immediate(right), senderKey: authority, recipientKey: recipient, reconnectRecipient: async () => { await right.stop(); await right.start(); } });
+    assert.equal(result.deliveries, 5);
+  } finally { await left.stop(); await right.stop(); }
 });
 
 test('memory network explicitly injects delay, duplication, reordering, loss and disconnection', async () => {
