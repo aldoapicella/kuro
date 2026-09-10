@@ -1,0 +1,14 @@
+{
+  "name": "@kuro/transport-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "node --import tsx src/real-smoke.ts"
+  },
+  "dependencies": {
+    "@kuro/contracts": "workspace:*",
+    "@kuro/transport": "workspace:*",
+    "hyperdht": "6.34.0"
+  }
+}
