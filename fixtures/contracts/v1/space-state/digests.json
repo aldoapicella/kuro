@@ -1,0 +1,20 @@
+{
+  "active.json": {
+    "wireBodySha256": "fa95a3192d81a6811d39504dfdc55a519d8e253fec7c8989ba8701a56552c287",
+    "canonicalStateSha256": "31954ea25b00475d0a096b867a77e2efdac2f2e587d3ab41369f805738bdf999",
+    "wireBodyBytes": 903,
+    "framePrefixHex": "00000387"
+  },
+  "renewal.json": {
+    "wireBodySha256": "08442c9b6b5dd189c017aec78c9054f7344056bf285e6f0bbbac4c51e7630e1c",
+    "canonicalStateSha256": "31954ea25b00475d0a096b867a77e2efdac2f2e587d3ab41369f805738bdf999",
+    "wireBodyBytes": 903,
+    "framePrefixHex": "00000387"
+  },
+  "denied.json": {
+    "wireBodySha256": "e5e922e62e8b993f08988421b99b0d988cf1e55cd8dd01d5ae89388bf69f7da3",
+    "canonicalStateSha256": "6fa5acf8ea23f1d50d3485ba3d69b231a797c5a8203f493f33bacb46748dae39",
+    "wireBodyBytes": 562,
+    "framePrefixHex": "00000232"
+  }
+}

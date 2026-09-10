@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "type": "SPACE_STATE_RESPONSE",
+  "requestId": "12121212121212121212121212121212",
+  "spaceAlias": "20202020202020202020202020202020",
+  "spaceId": "30303030303030303030303030303030",
+  "authorityKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "recipientKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "policyRevision": 8,
+  "publicationSeq": 13,
+  "projectionScope": "recipient-authorized-peers-v1",
+  "status": "DENIED",
+  "validForMs": 1,
+  "members": [],
+  "projectionDigest": "6fa5acf8ea23f1d50d3485ba3d69b231a797c5a8203f493f33bacb46748dae39"
+}

@@ -1,0 +1,38 @@
+{
+  "v": 1,
+  "type": "SPACE_STATE_RESPONSE",
+  "requestId": "10101010101010101010101010101010",
+  "spaceAlias": "20202020202020202020202020202020",
+  "spaceId": "30303030303030303030303030303030",
+  "authorityKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "recipientKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "policyRevision": 7,
+  "publicationSeq": 11,
+  "projectionScope": "recipient-authorized-peers-v1",
+  "status": "ACTIVE",
+  "validForMs": 900000,
+  "members": [
+    {
+      "memberId": "01010101010101010101010101010101",
+      "deviceKeys": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "capabilities": [
+        "read",
+        "share",
+        "manage"
+      ]
+    },
+    {
+      "memberId": "02020202020202020202020202020202",
+      "deviceKeys": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "capabilities": [
+        "search",
+        "receive"
+      ]
+    }
+  ],
+  "projectionDigest": "31954ea25b00475d0a096b867a77e2efdac2f2e587d3ab41369f805738bdf999"
+}

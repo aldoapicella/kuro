@@ -1,6 +1,6 @@
 # Contributing to KURO
 
-Start with the [architecture](docs/architecture.md). This repository currently contains design documentation, module boundaries, and a Python reference model. The application adapters remain to be implemented.
+Start with the shared [agent instructions](AGENTS.md), [engineering baseline](docs/development/engineering-baseline.md), and relevant [architecture](docs/architecture.md) sections. The baseline defines ownership, the shared contract checkpoint, public semantics, and acceptance criteria. This repository currently contains design documentation, module boundaries, and a Python reference model. The application adapters remain to be implemented.
 
 ## Module boundaries
 
@@ -9,6 +9,8 @@ Start with the [architecture](docs/architecture.md). This repository currently c
 - The AI adapter receives authorized inputs and returns calculations. It cannot grant access, approve disclosure, or transmit evidence.
 - The transport provides authenticated peer identity and bytes. It does not read the corpus or rebuild approved payloads.
 - Shared contracts have runtime validation as well as TypeScript types. Real adapters and test doubles must satisfy the same observable contract.
+
+Shared-space membership, verified device bindings, coarse capabilities, and discoverable peer relationships belong to the one pinned owner authority. Custodian-local policy authorities retain document grants, restrictions, reviewer rights, and denials, and may only narrow the shared ceiling. Use the two direct-authenticated state messages and freshness rules from [D25](docs/decisions/D25-shared-space-authority.md); runtime implementation remains planned.
 
 ## Changes and dependencies
 
@@ -32,8 +34,16 @@ python3 -m unittest discover -s verification -v
 
 Application tests must be added with their implementations. Reference-model tests and mock-backed harnesses do not prove that QVAC, Pear, Electron, or cross-device operation works.
 
+Validate the D25 structural schema and synthetic fixtures with an isolated development dependency:
+
+```sh
+uv run --no-project --with jsonschema==4.26.0 python scripts/check-space-state-contract.py
+```
+
+This checks structural acceptance/rejection, canonical state digests, response-body digests, and frame sizes. It does not test authenticated fetch, persistence, revocation, or live lease enforcement.
+
 ## Local tooling and data
 
-See [Graphify setup](docs/development/graphify.md) for installation, graph building, and queries. Keep generated graph output and local assistant integration out of version control.
+See [Graphify setup](docs/development/graphify.md) for installation, graph building, and queries. `AGENTS.md` is tracked so every checkout receives the shared baseline. Keep generated graph output, third-party assistant skill bundles, and local assistant configuration out of version control.
 
 Use synthetic fixtures and separate private directories for each test identity. Keep keys, runtime databases, model weights, and user documents outside tracked files. `.gitignore` reduces accidental additions; it is not an access-control mechanism.

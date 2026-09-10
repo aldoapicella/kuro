@@ -6,6 +6,8 @@ Originals and indexes remain in their custody domain. Only explicitly approved p
 
 **Implementation status:** this is a design specification. Official documentation and QVAC 0.19.0 package declarations were inspected during proposal preparation. A separate Python/SQLite reference model exercises selected authorization and delivery contracts. QVAC inference, the Electron application, the production SQLite adapters, and real Pear communication have not been integrated or benchmarked.
 
+The [engineering baseline](development/engineering-baseline.md) defines shared implementation conventions, module ownership, the contract bootstrap checkpoint, and acceptance criteria. It resolves integration details such as text offsets and wire framing while preserving the decisions below.
+
 ## 1. Problem and scope
 
 Participants need to discover information held by others without acquiring unrestricted access to their archives. DatashareNetwork documents one instance of this problem; KURO generalizes the collaboration model to confidential information across organizations. Adoption outside the motivating scenarios remains a hypothesis to validate. [19]
@@ -44,8 +46,8 @@ For example, Alice asks about a pending condition. Bob's index retrieves a passa
 
 | Concept | Responsibility and minimum data |
 | --- | --- |
-| Private space | Collaboration ID, display name, members, and local policy. A space is not a synchronized folder. |
-| Member | Authorized identity, linked device keys, and membership status. |
+| Private space | Collaboration ID, display name, shared authority binding, recipient-scoped membership projection, and custodian-local policy. A space is not a synchronized folder. |
+| Member | Shared-authority membership, verified device keys, coarse capabilities, allowed peer relationships, and local policy overlay. |
 | Document | Local original, assigned space, versions, passages, and restrictions. One space per document in the MVP. |
 | Permission | Subject, resource scope, action, validity, and revision. Document restrictions can only narrow space grants. |
 | Request | Question, requester, recipient peer, space, expiry, and state. Search does not guarantee disclosure. |
@@ -69,18 +71,23 @@ Default deny applies. Effective authorization requires all applicable conditions
 
 ```text
 allow(subject, action, space, document, now) =
-  authenticated identity and active membership
-  and unexpired policy
-  and explicit action grant in the space
+  authenticated identity and active shared-authority membership
+  and current, unexpired recipient-scoped authority snapshot
+  and shared capability explicitly permits the action
+  and authorized peer relationship
+  and locally admitted membership and unexpired local policy
+  and explicit local action grant in the space
   and document belongs to that space
   and document restrictions admit that subject and action
 ```
 
 Missing document ACLs deny access. A document restriction cannot add rights absent at space level. Removing membership invalidates future permissions even when older document exceptions exist. KURO checks the relevant action again before review, approval, dispatch, and display. The AI never changes permissions.
 
-**D21 — One local policy authority per space.** A configured identity with a valid session and `manage` can broaden content grants. Other managers may invite or remove members, but invitations start without content rights. They cannot replace the authority or grant themselves reading access. Authority recovery is a separate local operation outside the P2P protocol. Device ownership remains a trust root; modifying the database maliciously is outside the application's protection. [26]
+**D21 — One custodian-local policy authority per space.** A configured local identity with a valid session and `manage` can broaden grants only within its delegated document policy. It cannot add or remove shared-space members, change verified device bindings, or grant beyond the shared capability ceiling. Shared membership and peer relationships belong to the one pinned authority device described in [D25](decisions/D25-shared-space-authority.md). Authority recovery is a separate owner-led operation outside the evidence protocol. Device ownership remains a trust root; modifying the database maliciously is outside the application's protection. [26]
 
-Changing policy increments `policyEpoch`; changing content or scope increments `corpusRevision`. Commands carry expected revisions and reject stale mutations. Each node's policy is authoritative only for its own corpus; membership at A does not compel B to accept a request.
+**D25 — One shared-space owner with recipient-scoped snapshots.** The owner acting locally on the pinned authority owns membership, device bindings, coarse capabilities, and each member's discoverable neighborhood. A custodian still owns its local document grants, restrictions, reviewer rights, and denials. The effective decision intersects the current shared snapshot with that local policy; a cached snapshot never grants document access by itself. `policyRevision` tracks effective shared changes, `publicationSeq` tracks each recipient publication, and local `policyEpoch` remains the effective local-policy revision. The two direct-authenticated state messages and bounded freshness rules are specified in [D25](decisions/D25-shared-space-authority.md); runtime implementation remains planned.
+
+Changing shared policy increments `policyRevision`; installing a changed shared policy or changing custodian-local grants increments local `policyEpoch`. Changing content or scope increments `corpusRevision`. Commands carry expected revisions and reject stale mutations. Each node's local policy is authoritative only for its own corpus; shared membership at A does not compel B to grant document access or accept a request.
 
 ### Derived content and validity
 
@@ -88,7 +95,7 @@ At B, a passage inherits its source restrictions. At A, a summary inherits the c
 
 A does not receive B's private ACLs or authority over its originals. It stores delivery conditions and provenance. Missing or uninterpretable processing conditions do not enable synthesis. The MVP blocks forwarding received evidence and summaries to third parties; any future disclosure would require fresh source authorization.
 
-A device key authenticates a device, not its human operator. The prototype preconfigures sessions, identities, and local grants. Policy expiry blocks new operations. An offline node cannot instantly learn remote revocations, and revocation cannot recall bytes already delivered.
+A device key authenticates a device, not its human operator. Pairing and shared-state synchronization establish the authority snapshot; local operator sessions and document grants remain separate. Policy expiry blocks new operations. Positive shared-state caches become stale after restart or suspend/resume and require fresh synchronization. An offline node cannot instantly learn remote revocations, and revocation cannot recall bytes already delivered.
 
 ### Authorization at boundaries
 
@@ -98,7 +105,8 @@ A device key authenticates a device, not its human operator. The prototype preco
 | Retrieval at B | Check space, versions, local operator reading rights, and A's eligibility to receive each source before ranking. |
 | Summary at A | Check received-evidence access and processing conditions; record all text exposed to the LLM. |
 | Approved disclosure | Require reviewer `read` and `share`, recipient `receive`, current revisions, and bytes matching the reviewed view. |
-| Permission changes | Require local authority, `manage`, scope, validity, and expected revision. Reject remote/model initiation. |
+| Authoring permission changes | Require the pinned shared owner for membership/bindings/capabilities/neighborhood changes, or the custodian-local authority for document policy; check scope, validity, and expected revision. Reject remote/model mutation commands. |
+| Installing shared state | Accept only correlated, validated direct-authority snapshots under D25. Update the read-only shared ceiling without changing custodian-local grants. |
 
 ## 3. Design foundations
 
@@ -180,8 +188,9 @@ The core owns one persistent work queue, admission rules, and fairness. The AI a
 
 | Tables | Essential fields and constraints |
 | --- | --- |
-| `spaces`, `members` | Local space, membership, identity, and linked keys; opaque peer-facing aliases. |
-| `grants`, `restrictions` | Subject, scope, actions, epoch, expiry, and revocation. |
+| `spaces`, `members` | Local space mapping; authoritative shared directory on the owner and read-only recipient-scoped membership projection elsewhere; identity, linked keys, and opaque peer-facing aliases. |
+| `space_authorities`, `space_state_publications`, `space_state_cache` | Pinned authority binding, owner-side policy/publication counters and exact responses, participant-side accepted projection, digest, high-water marks, lease evidence, and stale/sync state. |
+| `grants`, `restrictions` | Custodian-local subject, scope, actions, epoch, expiry, and revocation; these can narrow shared capabilities but cannot add shared membership. |
 | `documents`, `versions` | Space, local source hash, version, extraction state, and restrictions. |
 | `spans` | Versioned ID, canonical offsets, locator, and exact text. |
 | `requests` | Unique peer/request ID, canonical request digest, admitted revisions, state, expiry, and coverage. |
@@ -198,7 +207,7 @@ Enable foreign keys, use prepared statements, and keep transactions short. Read 
 
 Canonical text retains a mapping to the source. Paragraphs, and unambiguous sentences where useful, become citable passages with stable IDs and version-specific offsets. Composite foreign keys include space, document, and version. Context blocks group nearby passages within roughly 350–500 tokens. Overlap preserves original passage IDs; block IDs do not replace source references. Define offset units explicitly rather than mixing JavaScript UTF-16 positions and byte offsets.
 
-Admit work against `policyEpoch`, `corpusRevision`, and `indexGeneration`. Capture only authorized versions with complete, compatible vectors. A changed or excluded source invalidates B's unsent draft. Evidence already received by A keeps its delivered version. Conservative space-wide invalidation is acceptable initially. Unsupported files and size limits produce partial coverage, not a claim that no evidence exists.
+Admit work against the local `policyEpoch`, shared `policyRevision`, `corpusRevision`, and `indexGeneration`. Capture only authorized versions with complete, compatible vectors. A changed or excluded source invalidates B's unsent draft. Evidence already received by A keeps its delivered version. A changed shared policy invalidates dependent work conservatively; an unchanged recipient lease renewal does not. Unsupported files and size limits produce partial coverage, not a claim that no evidence exists.
 
 ## 6. Retrieval and local synthesis
 
@@ -235,7 +244,7 @@ Each row identifies `(spaceId, documentId, versionId, chunkId)` and includes `sp
 ```text
 Short read transaction at B:
   validate identity, search, and question audience
-  capture policyEpoch, corpusRevision, indexGeneration
+  capture policyEpoch, policyRevision, corpusRevision, indexGeneration
   join vector rows to active versions and current permissions
   require the correct space and active version
           and read(local operator) and receive(requester)
@@ -352,7 +361,7 @@ An exact quote saying "payment has not been approved" does not support "payment 
 
 ## 7. P2P protocol and durable workflow
 
-**D09 — Connect known keys using HyperDHT in a Pear worker.** Private spaces do not require public Hyperswarm topics. Verify keys out of band or in person; an invitation alone does not verify a human identity. [11][12]
+**D09 — Connect known keys using HyperDHT in a Pear worker.** Private spaces do not require public Hyperswarm topics. Verify keys out of band or in person; an invitation alone does not verify a human identity. The five evidence-protocol messages are supplemented by the two direct-authority state messages defined in [D25](decisions/D25-shared-space-authority.md). [11][12]
 
 `remotePublicKey` from the authenticated transport is authoritative. Resolve aliases with `(remotePublicKey, spaceAlias)`, not display names or a JSON `sender`. A changed key requires fresh pairing; matching a display name does not inherit access.
 
@@ -376,6 +385,8 @@ An exact quote saying "payment has not been approved" does not support "payment 
 | `CLOSED` | Close without shared content. Does not automatically distinguish no findings from a decision not to share. |
 
 **D10 — Bounded framing and strict validation.** Use length-prefixed UTF-8 JSON, at most 32 KiB per frame, a 2 KiB question limit, and a maximum 24-hour TTL. Reject oversized lengths before allocating the body. Reject unknown fields and bound queues, connections, and requests per authenticated identity. Do not use `eval`, class deserialization, or remotely supplied method names.
+
+`SPACE_STATE_REQUEST` and `SPACE_STATE_RESPONSE` are read-only synchronization messages between a participant and its pinned authority. The authority authenticates the requesting device directly and returns a complete recipient projection; a participant or cached copy cannot issue membership or document permissions. Active state leases are at most 15 minutes from the original sync send time, and positive cached state is stale after restart or suspend/resume. Protected operations remain closed until the clock/lifecycle epoch is valid and a fresh snapshot is installed. `policyRevision` and per-recipient `publicationSeq` remain separate. D25 owns their structural schema, canonical digest, replay/counter rules, and runtime acceptance criteria; this architecture does not duplicate that protocol.
 
 UI and network command types are distinct. The remote protocol has no `approve`, `readFile`, `changeGrant`, or `runModel` operation. Receiving a response does not start local synthesis. Scope fields are checked against local policy rather than accepted as grants from the sender.
 
@@ -582,8 +593,9 @@ Before claiming a working prototype, verify:
 2. Imported versions, passages, complete index generations, and permissions before ranking.
 3. Human review, atomic approval/outbox, inbox persistence before ACK, and immutable retry bytes.
 4. Optional local summaries with complete manifests, exact citations, and evidence reading without a model.
-5. Revocation, interrupted processes, disk failure, cross-request isolation, bounded load, and fresh LAN operation without internet.
-6. Reproducible installation and a demonstration identifying actual devices, models, measurements, and remaining limitations.
+5. Shared-space authority enrollment, recipient projection, counter/replay handling, lease expiry, lifecycle stale state, and local-policy intersection.
+6. Revocation, interrupted processes, disk failure, cross-request isolation, bounded load, and fresh LAN operation without internet.
+7. Reproducible installation and a demonstration identifying actual devices, models, measurements, and remaining limitations.
 
 | Alternative | Why it is deferred |
 | --- | --- |
@@ -597,7 +609,7 @@ Before claiming a working prototype, verify:
 
 ## Sources
 
-The underlying research consulted primary sources in September 2026. Book references refer to official public companion material and tables of contents, not a reading of the complete books. KURO's limits and D01–D24 decisions are proposed design choices, not certifications or vendor performance guarantees.
+The underlying research consulted primary sources in September 2026. Book references refer to official public companion material and tables of contents, not a reading of the complete books. KURO's limits and D01–D25 decisions are proposed design choices, not certifications or vendor performance guarantees.
 
 [1] Valliappa Lakshmanan and Hannes Hapke. [Generative AI Design Patterns: official repository and pattern catalog](https://github.com/lakshmanok/generative-ai-design-patterns). The catalog may evolve beyond the printed edition.
 

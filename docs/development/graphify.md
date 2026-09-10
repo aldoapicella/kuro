@@ -22,7 +22,7 @@ The setup pins `graphifyy` to **0.9.57**, requests Python **3.12** in an isolate
 
 The base package includes the local parsing, graph, and query dependencies. No external graph database, Node runtime, or LLM API key is required for the code-only workflow. Optional remote inference backends and external database integrations are not part of this setup.
 
-The script also registers the project-local Codex skill and integration files. These files, including `AGENTS.md` and `.codex/`, are ignored by Git rather than vendored. Restart the shell if uv adds its tool directory to PATH. Reload the project or start a new Codex task if the newly installed skill is not yet visible. Graphify's [installation documentation](https://graphify.com/docs/install) describes supported assistant integrations.
+The script also registers the project-local Codex skill and integration files. The third-party skill bundle and local `.codex/` configuration are ignored by Git rather than vendored. KURO's root `AGENTS.md` is tracked and includes Graphify guidance alongside the shared engineering rules; preserve those rules when updating tooling. Restart the shell if uv adds its tool directory to PATH. Reload the project or start a new Codex task if the newly installed skill is not yet visible. Graphify's [installation documentation](https://graphify.com/docs/install) describes supported assistant integrations.
 
 ## Build and inspect the code graph
 
