@@ -1,5 +1,5 @@
-# Motor de IA local — Persona 1
+# Local AI engine
 
-Estado: por implementar. Responsable de QVAC, embeddings, ranking sobre candidatos autorizados, preparación de contexto, síntesis, citas y exclusión de operaciones activas.
+Status: planned. QVAC integration, embeddings, ranking over authorized candidates, bounded context preparation, local summaries, citations, and single-operation execution control.
 
-Implementa `AiPort`. No abre SQLite, decide permisos ni envía contenido por P2P. Se desarrolla con el [harness de IA](../../harnesses/ai/README.md) y fixtures sintéticos. Alcance completo en el [plan de equipo](../../docs/team-plan.md).
+Implements `AiPort`. It does not open SQLite, decide permissions, or transmit evidence. Develop against the [AI harness](../../harnesses/ai/README.md) and synthetic fixtures. See the [architecture](../../docs/architecture.md).

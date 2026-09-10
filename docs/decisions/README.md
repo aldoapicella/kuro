@@ -1,3 +1,3 @@
-# Decisiones de implementación
+# Implementation decisions
 
-Registrar aquí cambios acordados de contratos, runtime y alcance, indicando problema, decisión, motivo, módulos afectados y cómo se verificará. Las decisiones iniciales D01–D24 y las fuentes están en [la arquitectura](../architecture.md).
+Record contract, runtime, and scope decisions here. Include the problem, decision, rationale, affected modules, and validation. The initial D01–D24 decisions and sources are in the [architecture](../architecture.md).

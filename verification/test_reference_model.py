@@ -11,9 +11,9 @@ def fixture():
     members=frozenset((p,s) for p in ('ana','bruno','admin') for s in ('A','B'))
     grants=frozenset({('ana','A','search'),('ana','A','receive'),('bruno','A','read'),
                       ('bruno','A','share'),('bruno','A','manage'),('admin','A','manage')})
-    visible=Document('A',1,{'p1':'Recepción provisional, con observaciones pendientes.'},
+    visible=Document('A',1,{'p1':'Provisional acceptance, with outstanding observations.'},
                      {'read':frozenset({'bruno'}),'share':frozenset({'bruno'}),'receive':frozenset({'ana'})})
-    hidden=Document('A',1,{'p2':'Contenido excluido para Ana.'},
+    hidden=Document('A',1,{'p2':'Content unavailable to the requester.'},
                     {'read':frozenset({'bruno'}),'share':frozenset({'bruno'}),'receive':frozenset({'admin'})})
     other=replace(visible,space='B')
     policy=Policy(members,frozenset({'ana','bruno','admin'}),grants,{'d1':visible,'d2':hidden,'d3':other},authorities={'A':'bruno'})

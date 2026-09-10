@@ -23,7 +23,7 @@ names = ids(suite)
 stream = io.StringIO()
 result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
 files = ['verification/reference_model.py', 'verification/test_reference_model.py',
-         'docs/architecture.md', 'docs/reference/architecture-pista.pdf']
+         'docs/architecture.md']
 record = {
     'scope': 'Executable design model only; no QVAC, Pear, Electron, OS crypto or production integration run.',
     'timestamp_utc': datetime.now(timezone.utc).isoformat(),

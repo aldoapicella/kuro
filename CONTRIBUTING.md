@@ -1,37 +1,39 @@
-# Trabajar en Kuro
+# Contributing to KURO
 
-Leer primero [la arquitectura](docs/architecture.md) y [el reparto de trabajo](docs/team-plan.md). La base actual es documental y de referencia; las carpetas de aplicación todavía no contienen una implementación.
+Start with the [architecture](docs/architecture.md). This repository currently contains design documentation, module boundaries, and a Python reference model. The application adapters remain to be implemented.
 
-## Primer corte conjunto
+## Module boundaries
 
-1. Acordar la versión de Node, Electron, QVAC y el gestor de paquetes después de las pruebas iniciales de compatibilidad.
-2. Crear los contratos compartidos de `AppPort`, `AiPort` y `TransportPort`, con validación en ejecución y fixtures sintéticos.
-3. Cada proveedor entrega un sustituto y pruebas de conformidad de su puerto para que los consumidores puedan avanzar.
-4. Integrar pronto un recorrido mínimo y sustituir progresivamente los simuladores por adaptadores reales.
+- The renderer consumes `AppPort` through a narrow preload API. It does not receive Node, SQL, sockets, or arbitrary filesystem access.
+- The core owns authorization, document versions, persisted workflow state, and the single logical SQLite writer. It consumes `AiPort` and `TransportPort`.
+- The AI adapter receives authorized inputs and returns calculations. It cannot grant access, approve disclosure, or transmit evidence.
+- The transport provides authenticated peer identity and bytes. It does not read the corpus or rebuild approved payloads.
+- Shared contracts have runtime validation as well as TypeScript types. Real adapters and test doubles must satisfy the same observable contract.
 
-## Cambios cotidianos
+## Changes and dependencies
 
-- Trabajar en ramas cortas, por ejemplo `ai/embedding-adapter`, `core/approval-outbox` o `desktop/review-screen`.
-- Enviar cambios pequeños a `main` mediante pull requests que expliquen comportamiento, validación y límites pendientes.
-- Mantener un solo lockfile cuando se configure el workspace; la persona 3 coordina cambios de dependencias y composición.
-- Coordinar cambios de `packages/contracts/` antes de modificar consumidores. No importar archivos internos de otro módulo.
-- Mantener la política, las migraciones y las transacciones dentro del núcleo. UI y transporte no abren la base de datos directamente.
-- Actualizar la declaración de base preexistente del README al incorporar código, plantillas, modelos o ejemplos externos.
+Use focused branches and small pull requests. Describe the resulting behavior, relevant validation, and unresolved limitations. Coordinate breaking interface changes before updating consumers; avoid importing another module's internal files.
 
-## Verificación disponible
+Keep migrations and policy checks inside the core. Model/profile changes require compatible indexing and context handling. Pin application runtimes and dependencies after compatibility checks, and maintain one application lockfile when the workspace is configured.
+
+Update the README provenance declaration when incorporating external code, templates, models, or examples. Use KURO consistently in project-facing text and write documentation, comments, and synthetic examples in English.
+
+## Available validation
 
 ```sh
 python3 verification/run_checks.py
 ```
 
-El resultado se escribe en `verification/results.json`, excluido de Git por ser un registro local generado. También se pueden ejecutar únicamente las pruebas:
+This writes a generated local record to `verification/results.json`, which is ignored by Git. To run the reference tests without that record:
 
 ```sh
 python3 -m unittest discover -s verification -v
 ```
 
-Estas pruebas cubren el modelo de referencia. Las pruebas de TypeScript, QVAC, Pear, Electron y el flujo entre dispositivos se incorporarán con sus implementaciones. Un recorrido simulado debe identificarse como tal.
+Application tests must be added with their implementations. Reference-model tests and mock-backed harnesses do not prove that QVAC, Pear, Electron, or cross-device operation works.
 
-## Datos de desarrollo
+## Local tooling and data
 
-Usar fixtures sintéticos y directorios privados separados para cada identidad de prueba. Guardar claves, bases locales, pesos de modelos y archivos de usuarios fuera de los archivos versionados. `.gitignore` es una ayuda para evitar incorporaciones accidentales, no una frontera de seguridad.
+See [Graphify setup](docs/development/graphify.md) for installation, graph building, and queries. Keep generated graph output and local assistant integration out of version control.
+
+Use synthetic fixtures and separate private directories for each test identity. Keep keys, runtime databases, model weights, and user documents outside tracked files. `.gitignore` reduces accidental additions; it is not an access-control mechanism.

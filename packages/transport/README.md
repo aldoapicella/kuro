@@ -1,5 +1,5 @@
-# Transporte P2P — Persona 2
+# Peer transport
 
-Estado: por implementar. Adaptador Pear/HyperDHT, worker, framing, identidad autenticada y ciclo de vida.
+Status: planned. Pear/HyperDHT adapter, network worker, bounded framing, authenticated identity, and lifecycle management.
 
-Implementa `TransportPort`. Entrega bytes y la clave autenticada al núcleo; envía los bytes proporcionados por este sin reconstruir evidencia. No accede a SQLite o al corpus. Incluir un transporte en memoria con pérdida y repetición controladas para pruebas.
+Implements `TransportPort`. Delivers bytes and authenticated peer keys to the core and sends core-provided bytes without reconstructing evidence. It has no corpus or SQLite access. Provide an in-memory transport with controlled loss and repetition for testing.

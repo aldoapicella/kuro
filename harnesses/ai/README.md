@@ -1,3 +1,3 @@
-# Pruebas independientes de IA — Persona 1
+# AI development harness
 
-Por implementar: cliente local de `AiPort` que cargue fixtures de textos, vectores autorizados y evidencia recibida. Debe permitir evaluar QVAC sin Electron, base de datos o pares conectados.
+Planned: a local `AiPort` client that loads synthetic text, authorized vector snapshots, and received evidence. It enables QVAC evaluation without Electron, a database, or connected peers.

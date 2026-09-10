@@ -1,5 +1,5 @@
-# Núcleo de custodia — Persona 2
+# Custody core
 
-Estado: por implementar. Contiene dominio, casos de uso, política, documentos versionados, SQLite, cola, aprobación, outbox e inbox.
+Status: planned. Domain rules, use cases, authorization, versioned documents, SQLite, scheduling, approval, outbox, and inbox.
 
-Expone `AppPort` y consume `AiPort` y `TransportPort`. Mantiene el único escritor lógico y la transacción que revalida permisos y guarda la aprobación con sus bytes. Alcance completo en el [plan de equipo](../../docs/team-plan.md).
+Exposes `AppPort` and consumes `AiPort` and `TransportPort`. Owns the single logical writer and the transaction that revalidates permissions and persists approval with exact outgoing bytes. See the [architecture](../../docs/architecture.md).

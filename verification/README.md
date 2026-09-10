@@ -1,40 +1,42 @@
-# Kuro: especificación ejecutable de diseño
+# KURO design reference
 
-Este directorio convierte una parte crítica de la arquitectura en contratos comprobables: permisos, dependencias de evidencia, aprobación y entrega. No es una aplicación QVAC, un prototipo funcional entre pares ni una implementación de seguridad lista para uso real.
+This directory expresses a subset of the architecture as executable contracts: permissions, evidence dependencies, approval, and delivery. It is not a QVAC application, working peer-to-peer prototype, or production security implementation.
 
-## Ejecutar
+## Run
 
-Desde la raíz del proyecto, con Python 3.10 o posterior y su módulo estándar SQLite:
+From the repository root:
 
 ```sh
 python3 verification/run_checks.py
 ```
 
-No requiere paquetes externos ni red. Produce `verification/results.json` con nombres de pruebas, resultados, runtime y SHA-256 de los documentos y código examinados. El comando alternativo `python3 -m unittest discover -s verification -v` ejecuta las pruebas sin generar el registro.
+The checks use Python and SQLite from the standard library without external packages or network access. Python 3.12 is the recommended development runtime. The command writes `verification/results.json` with test names, outcomes, runtime versions, and SHA-256 hashes of the inspected source and architecture document.
 
-## Qué se comprueba
+Alternatively, run `python3 -m unittest discover -s verification -v` without generating the record.
 
-- Una matriz de 256 combinaciones independientes de identidad, membresía, permisos, documento y vigencia.
-- Ausencia de acceso implícito por `manage`; predicado que reserva cambios de contenido a la autoridad de política del espacio.
-- Restricciones de todas las fuentes expuestas al modelo, incluso las no citadas.
-- Alcance del espacio, versiones, audiencia de la pregunta e IDs de pasajes.
-- Reconstrucción de citas desde el texto original de la versión registrada.
-- Ausencia de despacho sin aprobación; revisión obsoleta y doble aprobación.
-- Reversión transaccional si ocurre una excepción entre aprobación y outbox.
-- Persistencia de bytes al cerrar y reabrir SQLite; reintentos de esos mismos bytes.
-- Deduplificación y rechazo de otro par, espacio o contenido distinto con el mismo ID.
-- Revocación antes de un nuevo intento y límite del control sobre bytes ya entregados al transporte.
+## Covered by the reference model
 
-## Qué no se comprueba
+- A matrix of 256 combinations of identity, membership, permissions, document access, and validity.
+- No implicit content access through `manage`; only the configured policy authority can satisfy the predicate for broadening content grants.
+- Restrictions inherited from every source exposed to a model, including uncited sources.
+- Space scope, source versions, question audience, and passage identifiers.
+- Exact quotes reconstructed from the registered source version.
+- Rejection of dispatch without approval, stale reviews, and duplicate approval.
+- Transaction rollback when a failure occurs between approval and outbox insertion.
+- Persistence of exact approved bytes across SQLite close/reopen and transport retries.
+- Deduplication and rejection of a different peer, space, or payload for the same identifier.
+- Revocation before a new dispatch attempt and the limit of control over bytes already handed to transport.
 
-La arquitectura confirmada ahora usa embeddings QVAC e índice filtrado en el custodio; este entrega fragmentos aprobados, y el solicitante puede resumirlos con QVAC local. Las 16 pruebas existentes cubren el contrato anterior de citas, permisos y entrega. No prueban embeddings, SQL de recuperación, ranking, actualización del índice, condiciones de procesamiento recibidas, esquema de afirmaciones ni respaldo semántico. Tampoco prueban colas, concurrencia o RAM. La síntesis en el solicitante es una decisión de diseño, no una integración probada; no se autoriza delegación automática a terceros.
+## Not covered
 
-El modelo abstrae la identidad y recibe una política confiable como argumento. El predicado de modificación de permisos se prueba, pero no existe una interfaz de administración. No existe un parser de red ni un worker QVAC. La inbox es un diccionario en memoria; no demuestra persistencia antes de ACK. Reabrir SQLite no equivale a cortar la energía ni matar un proceso durante un commit.
+The chosen architecture uses embeddings and a permission-filtered index at the custodian, followed by approved evidence delivery and optional local synthesis at the requester. The 16 reference tests cover the earlier citation, permission, and delivery contract. They do not execute embeddings, retrieval SQL, ranking, index updates, received processing conditions, claim schemas, or semantic-support evaluation. Queueing, concurrency, and memory behavior are also untested.
 
-La implementación TypeScript deberá leer política, revisiones y estado en la misma transacción de su escritor local. El modelo reconstruye los bytes durante `dispatch` solo para detectar inconsistencias en las pruebas; el producto debe validar las dependencias y transportar los bytes aprobados persistidos, sin regeneración.
+Identity is abstracted and policy is a trusted input to the model. There is no permission-management UI, network decoder, or QVAC worker. The reference inbox is an in-memory dictionary and does not prove persistence before ACK. Reopening SQLite is not a power-loss or process-crash test during commit.
 
-`qvac-package-inspection.json` registra una inspección estática del paquete publicado 0.19.0. Describe declaraciones de API y su huella, no resultados de inferencia.
+The TypeScript implementation must read current policy and state in the same SQLite writer transaction. The reference dispatcher reconstructs bytes only to detect inconsistent test inputs; the application dispatcher must validate dependencies and send persisted approved bytes without regeneration.
 
-## Base y atribución
+`qvac-package-inspection.json` is a static inspection record for the published SDK package 0.19.0. Declarations and checksums are not inference results.
 
-Código de referencia y pruebas escritos para esta propuesta. Uso de Python, unittest y SQLite de biblioteca estándar. El diseño adapta conceptos de los materiales oficiales públicos de *Generative AI Design Patterns* y *Building Applications with AI Agents*, citados en la arquitectura. No se copiaron implementaciones de sus repositorios ni se emplearon inferencias remotas. La arquitectura explica cómo deberá integrarse el SDK obligatorio de QVAC; este directorio por sí solo no satisface el requisito de una aplicación construida con QVAC.
+## Provenance
+
+This reference code and its tests were written during preparation of the KURO proposal before repository creation, with Codex assistance. They use Python, unittest, and SQLite from the standard library. The architecture applies concepts from the official public companion materials of *Generative AI Design Patterns* and *Building Applications with AI Agents*, cited in the architecture. No implementations from those repositories were copied.

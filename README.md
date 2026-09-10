@@ -1,14 +1,25 @@
-# Kuro
+# KURO
 
-Nombre temporal de una aplicación para consultar y compartir información confidencial entre pares, con inferencia local mediante QVAC.
+Local AI and peer-to-peer collaboration for confidential knowledge.
 
-**El custodio busca; el solicitante puede resumir.** El custodio mantiene sus originales e índice, recupera fragmentos bajo permisos y revisa su entrega. El solicitante recibe únicamente los fragmentos aprobados y puede resumirlos localmente con referencias.
+KURO lets participants query information held by trusted peers while each custodian retains control of their original documents. A custodian retrieves relevant passages locally with QVAC, reviews the proposed disclosure, and sends only approved evidence. The recipient can read that evidence and optionally summarize it on their own device.
 
-## Estado del proyecto
+## Project status
 
-Base inicial para trabajar entre tres personas. Incluye arquitectura, plan de implementación, carpetas de módulos y un modelo de referencia ejecutable en Python. La aplicación Electron/TypeScript, el SDK QVAC y el transporte Pear todavía están por integrar. Las pruebas de referencia no demuestran que exista una aplicación funcional ni validan su seguridad en producción.
+Architecture and executable design reference. The Electron application, QVAC inference adapters, and Pear transport are not implemented yet. The Python reference tests exercise authorization and delivery invariants; they do not validate a production application or a working QVAC/Pear integration.
 
-## Empezar
+## Design principles
+
+- **Local inference:** embeddings and optional generation run through QVAC on the participating devices.
+- **Explicit disclosure:** access checks precede retrieval; an authorized reviewer approves the exact content and recipient.
+- **Source custody:** original documents and indexes stay with their custodian. There is no shared global index.
+- **Traceable evidence:** references identify the origin, document version, and passage. Generated summaries remain distinct from received evidence.
+- **Durable delivery:** approval and outgoing bytes commit together; retries preserve those bytes and receivers deduplicate deliveries.
+- **Bounded processing:** receiving evidence does not automatically start a model or authorize forwarding it to another peer.
+
+See the [technical architecture](docs/architecture.md) for contracts, tradeoffs, threat boundaries, and validation requirements.
+
+## Getting started
 
 ```sh
 git clone https://github.com/aldoapicella/kuro.git
@@ -16,46 +27,43 @@ cd kuro
 python3 verification/run_checks.py
 ```
 
-El repositorio es privado: clonar requiere una cuenta autorizada. Las pruebas requieren Python 3.10 o posterior y su SQLite de biblioteca estándar; no descargan modelos ni necesitan dependencias externas. Los comandos de desarrollo de la aplicación se definirán al fijar los contratos y verificar los runtimes.
+Repository access requires an authorized GitHub account. The reference checks use the Python standard library. Use Python 3.12 for the development tooling; see [Graphify setup](docs/development/graphify.md) for an isolated installation.
 
-- [Arquitectura técnica y fuentes](docs/architecture.md)
-- [Plan de trabajo para tres personas](docs/team-plan.md)
-- [Cómo contribuir e integrar cambios](CONTRIBUTING.md)
-- [Alcance exacto de las pruebas de referencia](verification/README.md)
-- [PDF de arquitectura previo, conservado con el nombre PISTA](docs/reference/architecture-pista.pdf)
+Application build commands and dependency versions will be established when the runtime compatibility checks pass. The module directories currently document their intended boundaries and are not installable packages.
 
-## Reparto de implementación
+## Repository structure
 
-| Responsable | Carpetas | Entrega |
-| --- | --- | --- |
-| Persona 1: IA local | `packages/ai/`, `harnesses/ai/` | QVAC, embeddings, ranking autorizado, contexto, síntesis y evaluación. |
-| Persona 2: custodia y P2P | `packages/core/`, `packages/transport/`, `harnesses/core/` | Permisos, versiones, SQLite, aprobación, recepción y reintentos. Custodia los contratos compartidos. |
-| Persona 3: escritorio e integración | `apps/desktop/`, `harnesses/desktop/`, `tests/integration/` | Electron, interfaz, composición de dependencias, empaquetado y demostración. |
+| Path | Purpose |
+| --- | --- |
+| `apps/desktop/` | Electron host, isolated renderer, preload, and dependency composition. |
+| `packages/contracts/` | Shared interfaces, messages, validation, and error semantics. |
+| `packages/core/` | Authorization, versioned documents, workflow, SQLite, inbox, and outbox. |
+| `packages/ai/` | QVAC integration, embeddings, ranking, and grounded local summaries. |
+| `packages/transport/` | Authenticated Pear/HyperDHT transport and bounded framing. |
+| `harnesses/` | Independent development environments for adapters and application layers. |
+| `fixtures/` | Synthetic evaluation and integration data. |
+| `tests/` | Planned contract and application integration tests. |
+| `verification/` | Executable Python design reference and its existing tests. |
+| `docs/` | Architecture, technical decisions, and development tooling. |
 
-Las carpetas son puntos de partida; todavía no son paquetes instalables. El primer acuerdo conjunto es definir `AppPort`, `AiPort` y `TransportPort` con tipos, validadores, ejemplos y sustitutos para trabajar en paralelo. Una misma aplicación puede ser custodio o solicitante según la consulta.
+## Development
 
-## Invariantes de la implementación
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for interface boundaries and validation conventions. [Graphify](docs/development/graphify.md) provides an optional local code graph for development; it is not KURO's document index or inference engine.
 
-- Toda inferencia debe ejecutarse localmente con QVAC; no se añade una API de inferencia en la nube.
-- Los permisos se filtran antes del ranking. La IA no concede acceso ni aprueba entregas.
-- Política, revisión, aprobación y bytes de outbox se confirman mediante el único escritor lógico de SQLite.
-- El transporte envía exactamente los bytes aprobados. La recepción persiste antes de confirmar con ACK.
-- Recibir evidencia no inicia síntesis automáticamente. El resumen local conserva todas las dependencias del contexto.
-- Revocar acceso no recupera información ya entregada. Las limitaciones y pruebas pendientes están documentadas en la arquitectura.
+Generated graphs, model weights, private documents, credentials, and runtime databases are excluded from version control.
 
-## Base preexistente y atribución
+## Provenance and dependencies
 
-Esta sección declara la base de este repositorio para la entrega al concurso:
+The following pre-existing material forms the initial base of this submission:
 
-- El diseño, el reparto de trabajo y el modelo de referencia se desarrollaron antes de crear este repositorio, durante la preparación de la misma propuesta bajo el nombre **PISTA**, el 9 de septiembre de 2026, con asistencia de Codex. Se incorporan como base inicial de Kuro.
-- `docs/architecture.md` y `docs/team-plan.md` adaptan esos documentos al nombre Kuro. `docs/reference/architecture-pista.pdf` conserva el PDF previo sin modificar. No es una versión de una aplicación ya construida.
-- `verification/` incorpora el código Python de referencia y sus pruebas preexistentes; se actualizan el nombre y las rutas del registro de comprobaciones para este repositorio. Usa Python, unittest y SQLite de biblioteca estándar.
-- `verification/qvac-package-inspection.json` conserva una inspección estática del paquete QVAC publicado. No representa una ejecución del SDK.
-- El diseño se apoya en documentación pública oficial de QVAC, Pear, Electron y SQLite, y en materiales públicos de *Generative AI Design Patterns* y *Building Applications with AI Agents*. Las fuentes están identificadas en la arquitectura; no se incorporan implementaciones de los repositorios de esos libros.
-- Se añaden en este arranque el README, las instrucciones de colaboración, la configuración de Git y las carpetas de los módulos. Las dependencias, modelos, ejemplos o código adicional que se incorporen deben registrarse aquí con su procedencia y licencia aplicable.
+- The architecture and Python design reference were developed during preparation of this same proposal on September 9, 2026, before repository creation, with Codex assistance. They are retained here under the KURO name.
+- `verification/` contains that earlier reference implementation and its tests, using Python, unittest, and SQLite from the standard library. Repository paths, documentation, and synthetic example text have been updated.
+- `verification/qvac-package-inspection.json` records static inspection of QVAC SDK 0.19.0. It is not evidence of runtime inference.
+- The architecture draws on official QVAC, Pear, Electron, and SQLite documentation and public companion materials for *Generative AI Design Patterns* and *Building Applications with AI Agents*. Sources are listed in the architecture. Implementations from those books' repositories have not been incorporated.
+- Graphify is third-party development tooling from [Graphify Labs](https://github.com/Graphify-Labs/graphify), distributed as `graphifyy`. Its pinned installation and local integration are documented separately. No Graphify source, third-party skill bundle, model weights, or generated graph is vendored into KURO.
 
-No se incluyen documentos confidenciales reales, credenciales ni pesos de modelos. No se ha seleccionado una licencia abierta para el proyecto; se mantiene como repositorio privado.
+Record the origin, version, and applicable license of any additional code, templates, models, or examples introduced during implementation. This repository remains private; no open-source license has been selected for KURO.
 
-## Entrega al concurso
+## Submission access
 
-El repositorio debe ser accesible al jurado durante toda la evaluación. Al mantenerlo privado, habrá que conceder acceso a las cuentas que indique la organización. El video demostrativo debe durar como máximo cinco minutos y tener un enlace accesible sin credenciales.
+Reviewers must have repository access throughout evaluation. The demonstration video must be no longer than five minutes and accessible without credentials. A simulated workflow must be identified as simulated; the final submission must demonstrate the actual QVAC integration.

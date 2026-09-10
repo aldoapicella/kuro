@@ -1,5 +1,5 @@
-# Fixtures compartidos
+# Shared fixtures
 
-Usar exclusivamente datos sintéticos. Preparar dos identidades y espacios, documentos permitidos y restringidos, cambios de versión, respuestas insuficientes y evidencia que contradiga un resumen incorrecto.
+Use synthetic data only. Cover separate identities and spaces, permitted and restricted documents, changed versions, insufficient evidence, and passages that contradict an incorrect summary.
 
-Cada fixture de contrato debe indicar el escenario y su resultado esperado. Los fixtures no representan una ejecución real de QVAC o Pear.
+Each contract fixture must state its scenario and expected outcome. Fixtures do not represent actual QVAC inference or Pear communication.

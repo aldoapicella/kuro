@@ -1,5 +1,5 @@
-# Integración — Persona 3
+# Integration tests
 
-Por implementar: consulta entre dos nodos, recuperación, revisión humana, aprobación, entrega persistida y síntesis local opcional. Incluir reconexión, reinicio, pérdida de ACK, revocación y lectura sin LLM.
+Planned: cross-node requests, retrieval, human review, approval, durable delivery, and optional local synthesis. Include reconnection, restart, lost ACK, revocation, and evidence reading without a language model.
 
-La persona 3 mantiene el recorrido; cada propietario corrige su módulo. Distinguir perfiles locales con simuladores de pruebas reales entre dispositivos con QVAC y Pear.
+Distinguish simulated local profiles from real cross-device tests with QVAC and Pear. A successful test double does not establish runtime integration.

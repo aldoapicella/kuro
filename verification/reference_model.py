@@ -1,4 +1,4 @@
-"""Executable Kuro design model. Not an app, QVAC adapter, or security boundary."""
+"""Executable KURO design model. Not an app, QVAC adapter, or security boundary."""
 from dataclasses import dataclass, field
 from hashlib import sha256
 import json

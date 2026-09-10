@@ -1,3 +1,3 @@
-# Pruebas independientes del núcleo — Persona 2
+# Core development harness
 
-Por implementar: dos núcleos con identidades y bases separadas, `FakeAiPort`, transporte sustituible y comandos locales de revisión. Permite verificar permisos, aprobación y recuperación de entregas sin interfaz gráfica.
+Planned: separate node identities and databases, `FakeAiPort`, replaceable transport, and local review commands. It exercises permissions, approval, and delivery recovery without a graphical interface.

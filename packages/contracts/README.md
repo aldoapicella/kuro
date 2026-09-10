@@ -1,5 +1,5 @@
-# Contratos compartidos
+# Shared contracts
 
-Estado: por implementar. La persona 2 custodia versiones; las tres personas acuerdan cambios de frontera.
+Status: planned. Shared types, runtime validators, events, errors, and observable behavior for `AppPort`, `AiPort`, and `TransportPort`.
 
-Aquí se definirán `AppPort`, `AiPort`, `TransportPort`, DTO, eventos, errores y validadores. Este paquete no depende de Electron, SQLite, Pear o QVAC. El [plan de equipo](../../docs/team-plan.md) describe las entradas y salidas propuestas.
+This package must not depend on Electron, SQLite, Pear, or QVAC. Real adapters and test doubles must satisfy the same contracts. See the [architecture](../../docs/architecture.md) for boundaries and invariants.

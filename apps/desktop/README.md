@@ -1,5 +1,5 @@
-# Aplicación de escritorio — Persona 3
+# Desktop application
 
-Estado: por implementar. Electron main, composición de dependencias, preload acotado, renderer, configuración y empaquetado.
+Status: planned. Electron host, dependency composition, narrow preload, isolated renderer, configuration, and packaging.
 
-El renderer consume únicamente `AppPort`. El host inyecta los adaptadores reales o simulados. La interfaz permite importar, preguntar, revisar fragmentos, aprobar, recibir evidencia y solicitar síntesis local. Alcance completo en el [plan de equipo](../../docs/team-plan.md).
+The renderer consumes only `AppPort`; the host injects real or simulated adapters. The interface supports import, questions, passage review, approval, evidence reading, and optional local summaries. See the [architecture](../../docs/architecture.md).

@@ -32,6 +32,15 @@ __pycache__/
 .pytest_cache/
 verification/results.json
 
+# Generated development tooling and local assistant integration
+/graphify-out/
+/.graphify/
+/.graphify_cache/
+/.codex/
+/.agents/
+/AGENTS.md
+/local-notes/
+
 # OS and editor state
 .DS_Store
 .idea/
