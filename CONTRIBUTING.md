@@ -10,6 +10,8 @@ Start with the shared [agent instructions](AGENTS.md), [engineering baseline](do
 - The transport provides authenticated peer identity and bytes. It does not read the corpus or rebuild approved payloads.
 - Shared contracts have runtime validation as well as TypeScript types. Real adapters and test doubles must satisfy the same observable contract.
 
+Shared-space membership, verified device bindings, coarse capabilities, and discoverable peer relationships belong to the one pinned owner authority. Custodian-local policy authorities retain document grants, restrictions, reviewer rights, and denials, and may only narrow the shared ceiling. Use the two direct-authenticated state messages and freshness rules from [D25](docs/decisions/D25-shared-space-authority.md); runtime implementation remains planned.
+
 ## Changes and dependencies
 
 Use focused branches and small pull requests. Describe the resulting behavior, relevant validation, and unresolved limitations. Coordinate breaking interface changes before updating consumers; avoid importing another module's internal files.
@@ -31,6 +33,14 @@ python3 -m unittest discover -s verification -v
 ```
 
 Application tests must be added with their implementations. Reference-model tests and mock-backed harnesses do not prove that QVAC, Pear, Electron, or cross-device operation works.
+
+Validate the D25 structural schema and synthetic fixtures with an isolated development dependency:
+
+```sh
+uv run --no-project --with jsonschema==4.26.0 python scripts/check-space-state-contract.py
+```
+
+This checks structural acceptance/rejection, canonical state digests, response-body digests, and frame sizes. It does not test authenticated fetch, persistence, revocation, or live lease enforcement.
 
 ## Local tooling and data
 

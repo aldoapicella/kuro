@@ -17,7 +17,7 @@ These shared instructions apply throughout the repository. Read the [engineering
 - Keep authorization, the single SQLite writer, durable workflow, and the single persistent computation queue in `packages/core/`.
 - The AI adapter computes over authorized inputs. The transport authenticates peer keys and moves bytes. Neither decides permissions or approves disclosure.
 - The renderer uses a narrow `AppPort`. Never expose SQL, Node, arbitrary paths, sockets, worker creation, or SDK instances to it.
-- Preserve default-deny policy, authorization before ranking, immutable approved bytes, and durable receipt before acknowledgment. See baseline requirements B01–B12.
+- Preserve default-deny policy, authorization before ranking, immutable approved bytes, durable receipt before acknowledgment, and the shared-space authority/freshness rules in [D25](docs/decisions/D25-shared-space-authority.md). See baseline requirements B01–B14.
 - Import other packages only through their public exports. Put shared types, strict runtime validators, protocol constants, and observable error semantics in `packages/contracts/`.
 - Treat changes to shared contracts, root tooling, dependency locks, fixtures used across modules, and public event semantics as integration changes. Publish them as a separate, reviewable checkpoint before dependent implementation. Preserve existing consumers or migrate them in the same change.
 - Keep secrets, source documents, models, databases, generated graphs, and sensitive logs out of Git. Test with synthetic data. Never claim transport encryption encrypts the database.

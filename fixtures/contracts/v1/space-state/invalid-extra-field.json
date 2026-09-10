@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "type": "SPACE_STATE_REQUEST",
+  "requestId": "10101010101010101010101010101010",
+  "spaceAlias": "20202020202020202020202020202020",
+  "recipientKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

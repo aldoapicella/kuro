@@ -1,6 +1,6 @@
 # KURO engineering baseline
 
-Baseline version: **0.1**. Status: **shared implementation specification**. This document adds integration conventions to the [architecture](../architecture.md); it does not claim the application or its adapters exist. At adoption, the repository contains documentation and a Python design reference, with application packages still planned.
+Baseline version: **0.2**. Status: **shared implementation specification**. This document adds integration conventions to the [architecture](../architecture.md) and the accepted [D25 shared-space authority design](../decisions/D25-shared-space-authority.md); it does not claim the application or its adapters exist. At adoption, the repository contains documentation and a Python design reference, with application packages still planned.
 
 The purpose is to let each module run and evolve independently while remaining compatible at integration. The tracked [AGENTS.md](../../AGENTS.md) requires implementation agents to follow this baseline. Read [CONTRIBUTING.md](../../CONTRIBUTING.md) for the contribution workflow.
 
@@ -8,13 +8,14 @@ The purpose is to let each module run and evolve independently while remaining c
 
 Each installation can act as custodian or requester for different requests. These are contextual responsibilities, not separate applications or profession-specific roles.
 
-1. The custodian imports immutable text snapshots and builds a local QVAC embedding index.
-2. An authenticated requester sends a bounded question to an explicitly selected custodian.
-3. The custodian authorizes the request and filters eligible source rows before ranking.
-4. A local reviewer selects and approves exact passages, references, conditions, and recipient.
-5. The core commits approval with the exact outgoing bytes and delivers them through Pear.
-6. The requester persists received evidence before acknowledgment. Evidence is readable independently of a model.
-7. A separate local action may run QVAC synthesis over permitted received evidence. The result remains a private derivative with complete provenance.
+1. The shared-space owner verifies devices and commits membership, device bindings, coarse capabilities, and allowed peer relationships on the pinned authority device.
+2. Each custodian imports immutable text snapshots and builds a local QVAC embedding index.
+3. An authenticated requester synchronizes its recipient-scoped shared-space snapshot, then sends a bounded question to an explicitly selected custodian.
+4. The custodian authorizes the request and filters eligible source rows before ranking.
+5. A local reviewer selects and approves exact passages, references, conditions, and recipient.
+6. The core commits approval with the exact outgoing bytes and delivers them through Pear.
+7. The requester persists received evidence before acknowledgment. Evidence is readable independently of a model.
+8. A separate local action may run QVAC synthesis over permitted received evidence. The result remains a private derivative with complete provenance.
 
 Original files, private indexes, full ACLs, local paths, and original-file hashes do not cross the peer protocol. The MVP does not forward received evidence or summaries to a third participant.
 
@@ -23,7 +24,7 @@ Original files, private indexes, full ACLs, local paths, and original-file hashe
 | Module | Owns | Integrates through | Must not own |
 | --- | --- | --- | --- |
 | `packages/contracts/` | Public types, runtime schemas, protocol encoding, constants, errors, compatibility fixtures | Public package exports | Database, Electron, QVAC, or Pear dependencies |
-| `packages/core/` | Policy, sessions, versions, SQLite migrations, index persistence, retrieval orchestration, queue, review, inbox/outbox, manifests | Exposes `AppPort`; consumes `AiPort`, `TransportPort`, and injected local infrastructure | Rendering, direct SDK calls, independent network protocol copies |
+| `packages/core/` | Shared-space authority commands and publications, recipient cache installation, local policy, sessions, versions, SQLite migrations, index persistence, retrieval orchestration, queue, review, inbox/outbox, manifests | Exposes `AppPort`; consumes `AiPort`, `TransportPort`, and injected local infrastructure | Rendering, direct SDK calls, independent network protocol copies |
 | `packages/ai/` | Local QVAC worker, embedding calculations, ranking calculations, exact context preparation, generation, output validation | Implements `AiPort` | SQL access, authorization, disclosure, persistent job scheduling |
 | `packages/transport/` | Pear/HyperDHT worker, authenticated connections, framing, bounded buffers, lifecycle | Implements `TransportPort` | Corpus access, policy decisions, payload reconstruction, application ACK decisions |
 | `apps/desktop/` | Electron lifecycle, composition, OS adapters, preload, renderer, packaging | Binds adapters to the core; renderer consumes `AppPort` | Duplicate domain state machines or renderer-side access control as the security boundary |
@@ -39,7 +40,7 @@ The first implementation checkpoint establishes the contract package and minimal
 
 Required checkpoint artifacts:
 
-- Public `AppPort`, `AiPort`, `TransportPort`, DTOs, validators, errors, states, capability negotiation, and all five wire-message schemas.
+- Public `AppPort`, `AiPort`, `TransportPort`, DTOs, validators, errors, states, capability negotiation, and all seven wire-message schemas: five evidence-protocol messages plus `SPACE_STATE_REQUEST` and `SPACE_STATE_RESPONSE`.
 - Synthetic valid and invalid fixtures, exact encoded wire bytes/digests, and shared conformance tests. Store cross-module fixtures under `fixtures/contracts/v1/` once created.
 - One root package manifest, one application package-manager lockfile, one TypeScript configuration family, and a recorded runtime compatibility decision under `docs/decisions/`.
 - Commands for type checking, contract tests, and each independently runnable harness. Publish the actual commands; do not document commands that have not run.
@@ -74,17 +75,17 @@ Core events identify the entity and committed revision, omit confidential payloa
 | --- | --- |
 | JSON | UTF-8, strict discriminated schemas, unknown fields rejected, bounded strings/arrays and nesting. Reject malformed UTF-8 and ambiguous duplicate object keys. |
 | IDs | Opaque strings, generated locally; request/response IDs contain at least 128 bits of cryptographic randomness. IDs and display names do not prove identity. |
-| Identity | Authenticated transport keys map to local member identities; several paired device keys share one identity quota. Freeze key encoding in contracts using the actual transport library. Never trust a body `sender` field. |
+| Identity | Authenticated transport keys map to local member identities; several paired device keys share one identity quota. Freeze key encoding in contracts using the actual transport library. Never trust a body `sender` field. Shared membership and device bindings come from the pinned space authority; custodian-local policy can only narrow them. |
 | References | Every passage identifies origin, document, version, and span. Local storage additionally keys by space. Context aliases map to complete references; do not reuse ambiguous span IDs across sources. |
 | Text offsets | Zero-based, half-open UTF-8 byte offsets into the immutable imported snapshot. For MVP valid UTF-8 text, preserve source bytes: no newline or Unicode normalization. Test multibyte characters, emoji, and CRLF. Future extraction needs an explicit source mapping/version. |
-| Revisions | Nonnegative safe integers: separate `policyEpoch`, `corpusRevision`, `indexGeneration`, and entity revision. Mutations compare expected revisions; never replace one with another. |
-| Time | Internal wall-clock timestamps are integer milliseconds since Unix epoch; durations carry explicit units. Inject wall and monotonic clocks. Protocol request validity uses bounded `ttlSeconds` from local admission; duplicates never reset expiry. Restart/clock rollback must not restore expired rights. |
+| Revisions | Nonnegative safe integers: separate shared `policyRevision`, per `(spaceId, authorityKey, recipientKey)` `publicationSeq`, local `policyEpoch`, `corpusRevision`, `indexGeneration`, and entity revision. Mutations compare expected revisions; never replace one with another. |
+| Time | Internal wall-clock timestamps are integer milliseconds since Unix epoch; durations carry explicit units. Inject wall and monotonic clocks. Evidence request validity uses bounded `ttlSeconds` from local admission; shared-state leases are bounded to 15 minutes and anchored to the original sync send time. Duplicates never reset expiry. Positive shared-state caches are stale after restart or suspend/resume, and clock rollback fails closed. |
 | Framing | Four-byte unsigned big-endian body length followed by at most 32,768 bytes of UTF-8 JSON. Validate length before allocation; handle partial and combined frames with bounded buffering. The prefix is outside the body limit. |
 | Request bounds | Question at most 2,048 UTF-8 bytes; TTL is a positive integer no greater than 86,400 seconds. No remote paths, SQL, tools, model commands, or permission mutations. |
 | Digests | SHA-256. Canonical request digests cover all validated fields, including version, type, scope, and TTL; pin serialization with fixtures. Delivery/ACK digests cover the exact serialized JSON body, excluding the framing prefix. Hashes detect identity/content conflicts; they do not prove a document's truth. |
 | Embeddings | Identified Float32 vectors plus model ID/checksum, dimension, normalization, and segmentation version. Validate dimension, finite values, and nonzero norm. Activate only complete compatible index generations. |
 
-The contract checkpoint must fully define `SEARCH_REQUEST`, `RECEIVED`, `APPROVED_RESPONSE`, `RESPONSE_ACK`, and `CLOSED` before writing their providers. All messages carry protocol version and a discriminated type. Check response/ACK correlation against the authenticated peer and persisted request/delivery scope, not just an ID. Bind opaque space aliases to `(peerKey, spaceAlias)` locally.
+The contract checkpoint must fully define `SEARCH_REQUEST`, `RECEIVED`, `APPROVED_RESPONSE`, `RESPONSE_ACK`, and `CLOSED` before writing their providers. The accepted [D25 design](../decisions/D25-shared-space-authority.md) adds `SPACE_STATE_REQUEST` and `SPACE_STATE_RESPONSE`; these are direct-authenticated authority synchronization messages, not replacements for the evidence protocol. All messages carry protocol version and a discriminated type. Check response/ACK correlation against the authenticated peer and persisted request/delivery scope, not just an ID. Bind opaque space aliases to `(peerKey, spaceAlias)` locally.
 
 Delivery conditions require an explicit local-processing permission and bounded validity whose receiver-side meaning is defined in the schema. Missing or unsupported conditions do not enable synthesis. Store first-receipt validity once; repeats cannot extend it. Absolute source validity, if present, can only narrow that window. Forwarding remains disabled. The exact field encoding, sizes, and expiration calculations belong in the shared schema and golden fixtures, not divergent adapter implementations.
 
@@ -106,6 +107,8 @@ Use separate request, delivery, and synthesis state enums, as in architecture se
 | B10 | Current access and delivery conditions apply to review, display, synthesis, and future dispatch. | Expiry, stale revisions, missing conditions, and clock rollback fail closed. No claims of instant offline revocation or recall of copies. |
 | B11 | Private state and secrets stay local and outside distributed code. | Secret-store failure is explicit; no production plaintext secret fallback, sensitive default logs, or real data in fixtures. Electron secret storage must reject unavailable/basic-text providers. |
 | B12 | Real providers and test doubles share observable contracts. | Run the same applicable conformance tests against both; report simulated, real-process, and physical cross-device evidence separately. |
+| B13 | One pinned shared-space authority owns membership, verified device bindings, coarse capabilities, and allowed peer relationships. Custodian-local policy authorities grant document rights only within that shared ceiling and cannot add shared members or override shared revocation. | Direct-authenticated recipient snapshots install only for the requesting device; non-owners cannot mutate shared membership; cached state is intersected with local grants and never grants document access by itself. |
+| B14 | Shared-state freshness is bounded and fail-closed: leases are at most 15 minutes from the original sync send, positive caches become stale after restart or suspend/resume, protected operations remain closed until the clock/lifecycle epoch is valid and a fresh sync is installed, and `policyRevision` is distinct from per-recipient `publicationSeq`. | Schema/fixture checks cover canonical digest and limits; runtime checks cover delayed/replayed responses, lower/conflicting counters, expiry, lifecycle stale state, the clock/lifecycle gate, and unchanged renewals versus policy changes. |
 
 Default demonstration bounds remain: one active operation, at most five waiting jobs, at most one pending request per authenticated member identity across linked devices, up to 120 seconds of computation per task, and small indexing batches. Reviewer waiting time is separate from computation; persist and bound review retention. Use eight vector and four literal candidates, fuse by rank, and select at most six blocks within the entire response-body limit. The initial corpus target is 40 blocks. Summary context is at most 4,096 tokens including instructions/question/schema and at most 512 output tokens; verify the chosen backend's accounting and reserve output capacity rather than assuming extra space.
 
@@ -115,11 +118,11 @@ Threshold changes are shared configuration changes with tests and measurements. 
 
 | Harness | Independent inputs | Must demonstrate |
 | --- | --- | --- |
-| Core | Two core instances, separate databases/identities, deterministic AI, controllable transport/clock | Import → request → permitted retrieval → manual review → approved delivery → durable ACK; restart, loss, replay, denial, optional summary scheduling |
+| Core | Owner and participant core instances, separate databases/identities, deterministic AI, controllable transport/clock | Authority enrollment and recipient projection → import → request → permitted retrieval → manual review → approved delivery → durable ACK; restart, loss, replay, denial, lease expiry, and optional summary scheduling |
 | AI | Synthetic permitted vectors/passages, prepared manifests, resource limits | Real local QVAC loading, embeddings/ranking, preparation/execution consistency, cancellation, invalid-output handling, no hidden context |
 | Desktop | Contract-conforming in-memory `AppPort` with scripted states | All user flows, stale review handling, unavailable models/peers, state refresh, escaped text, narrow preload |
 
-Fakes live in clearly named testing exports or harness packages. They implement the current contracts and are selected explicitly. A real adapter failure never silently swaps to a fake. Shared fixtures cover authorized, restricted, cross-space, stale-version, oversized, duplicate, and insufficient-evidence cases.
+Fakes live in clearly named testing exports or harness packages. They implement the current contracts and are selected explicitly. A real adapter failure never silently swaps to a fake. Shared fixtures cover authorized, restricted, cross-space, stale-version, oversized, duplicate, insufficient-evidence, and shared-state freshness/counter cases.
 
 Merge order follows dependencies, not completion of whole modules:
 

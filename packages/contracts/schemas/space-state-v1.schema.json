@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kuro:space-state:v1",
+  "title": "KURO v1 direct-authority space state messages",
+  "description": "Structural contract only. D25 defines authenticated origin, recipient binding, complete-projection semantics, canonical digests, revisions, transactions, and lease enforcement.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 32,
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "keyOrDigest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "positiveCounter": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "capability": {
+      "enum": ["search", "read", "share", "receive", "manage"]
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memberId", "deviceKeys", "capabilities"],
+      "properties": {
+        "memberId": { "$ref": "#/$defs/id" },
+        "deviceKeys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/keyOrDigest" }
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "requestId", "spaceAlias"],
+      "properties": {
+        "v": { "const": 1 },
+        "type": { "const": "SPACE_STATE_REQUEST" },
+        "requestId": { "$ref": "#/$defs/id" },
+        "spaceAlias": { "$ref": "#/$defs/id" }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v", "type", "requestId", "spaceAlias", "spaceId", "authorityKey",
+        "recipientKey", "policyRevision", "publicationSeq", "projectionScope",
+        "status", "validForMs", "members", "projectionDigest"
+      ],
+      "properties": {
+        "v": { "const": 1 },
+        "type": { "const": "SPACE_STATE_RESPONSE" },
+        "requestId": { "$ref": "#/$defs/id" },
+        "spaceAlias": { "$ref": "#/$defs/id" },
+        "spaceId": { "$ref": "#/$defs/id" },
+        "authorityKey": { "$ref": "#/$defs/keyOrDigest" },
+        "recipientKey": { "$ref": "#/$defs/keyOrDigest" },
+        "policyRevision": { "$ref": "#/$defs/positiveCounter" },
+        "publicationSeq": { "$ref": "#/$defs/positiveCounter" },
+        "projectionScope": { "const": "recipient-authorized-peers-v1" },
+        "status": { "enum": ["ACTIVE", "DENIED"] },
+        "validForMs": { "type": "integer", "minimum": 0, "maximum": 900000 },
+        "members": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/member" }
+        },
+        "projectionDigest": { "$ref": "#/$defs/keyOrDigest" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ACTIVE" } }, "required": ["status"] },
+          "then": { "properties": { "validForMs": { "minimum": 1 }, "members": { "minItems": 1 } } },
+          "else": { "properties": { "validForMs": { "const": 0 }, "members": { "maxItems": 0 } } }
+        }
+      ]
+    }
+  }
+}

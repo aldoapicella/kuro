@@ -19,6 +19,8 @@ Architecture and executable design reference. The Electron application, QVAC inf
 
 See the [technical architecture](docs/architecture.md) for contracts, tradeoffs, threat boundaries, and validation requirements.
 
+The accepted [D25 shared-space authority design](docs/decisions/D25-shared-space-authority.md) defines one pinned owner for shared membership, device bindings, coarse capabilities, and recipient neighborhoods. Custodian-local document policy still controls grants and disclosure. Its two state-message JSON Schemas and synthetic fixtures are defined; runtime synchronization, authentication, and freshness enforcement remain to be implemented.
+
 ## Getting started
 
 ```sh
@@ -61,6 +63,7 @@ The following pre-existing material forms the initial base of this submission:
 - `verification/qvac-package-inspection.json` records static inspection of QVAC SDK 0.19.0. It is not evidence of runtime inference.
 - The architecture draws on official QVAC, Pear, Electron, and SQLite documentation and public companion materials for *Generative AI Design Patterns* and *Building Applications with AI Agents*. Sources are listed in the architecture. Implementations from those books' repositories have not been incorporated.
 - Graphify is third-party development tooling from [Graphify Labs](https://github.com/Graphify-Labs/graphify), distributed as `graphifyy`. Its pinned installation and local integration are documented separately. No Graphify source, third-party skill bundle, model weights, or generated graph is vendored into KURO.
+- The space-state schema checker uses [python-jsonschema](https://github.com/python-jsonschema/jsonschema) 4.26.0 (MIT) as an isolated development dependency. KURO's D25 schemas, synthetic fixtures, and checking script were authored for this project; no authorization or transport implementation is supplied by that validator.
 
 Record the origin, version, and applicable license of any additional code, templates, models, or examples introduced during implementation. This repository remains private; no open-source license has been selected for KURO.
 
