@@ -48,7 +48,7 @@ Application build commands and dependency versions will be established when the 
 
 ## Development
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for interface boundaries and validation conventions. [Graphify](docs/development/graphify.md) provides an optional local code graph for development; it is not KURO's document index or inference engine.
+Read [AGENTS.md](AGENTS.md) and the [engineering baseline](docs/development/engineering-baseline.md) before implementation. They define shared contracts, module ownership, independent harnesses, and integration acceptance criteria. [CONTRIBUTING.md](CONTRIBUTING.md) covers contribution conventions. [Graphify](docs/development/graphify.md) provides an optional local code graph for development; it is not KURO's document index or inference engine.
 
 Generated graphs, model weights, private documents, credentials, and runtime databases are excluded from version control.
 

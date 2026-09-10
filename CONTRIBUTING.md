@@ -1,6 +1,6 @@
 # Contributing to KURO
 
-Start with the [architecture](docs/architecture.md). This repository currently contains design documentation, module boundaries, and a Python reference model. The application adapters remain to be implemented.
+Start with the shared [agent instructions](AGENTS.md), [engineering baseline](docs/development/engineering-baseline.md), and relevant [architecture](docs/architecture.md) sections. The baseline defines ownership, the shared contract checkpoint, public semantics, and acceptance criteria. This repository currently contains design documentation, module boundaries, and a Python reference model. The application adapters remain to be implemented.
 
 ## Module boundaries
 
@@ -34,6 +34,6 @@ Application tests must be added with their implementations. Reference-model test
 
 ## Local tooling and data
 
-See [Graphify setup](docs/development/graphify.md) for installation, graph building, and queries. Keep generated graph output and local assistant integration out of version control.
+See [Graphify setup](docs/development/graphify.md) for installation, graph building, and queries. `AGENTS.md` is tracked so every checkout receives the shared baseline. Keep generated graph output, third-party assistant skill bundles, and local assistant configuration out of version control.
 
 Use synthetic fixtures and separate private directories for each test identity. Keep keys, runtime databases, model weights, and user documents outside tracked files. `.gitignore` reduces accidental additions; it is not an access-control mechanism.

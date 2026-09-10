@@ -6,6 +6,8 @@ Originals and indexes remain in their custody domain. Only explicitly approved p
 
 **Implementation status:** this is a design specification. Official documentation and QVAC 0.19.0 package declarations were inspected during proposal preparation. A separate Python/SQLite reference model exercises selected authorization and delivery contracts. QVAC inference, the Electron application, the production SQLite adapters, and real Pear communication have not been integrated or benchmarked.
 
+The [engineering baseline](development/engineering-baseline.md) defines shared implementation conventions, module ownership, the contract bootstrap checkpoint, and acceptance criteria. It resolves integration details such as text offsets and wire framing while preserving the decisions below.
+
 ## 1. Problem and scope
 
 Participants need to discover information held by others without acquiring unrestricted access to their archives. DatashareNetwork documents one instance of this problem; KURO generalizes the collaboration model to confidential information across organizations. Adoption outside the motivating scenarios remains a hypothesis to validate. [19]
