@@ -1,0 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { MemoryNetwork,MemoryTransport } from '@kuro/transport';
+import { openCore } from '../src/index.js';
+import { FakeAiPort,FakeClock,FakeIds,FakeSession,FakePairing,MemorySelectedFiles } from '../src/testing.js';
+const directory=process.argv[2]!;
+const metadata=JSON.parse(readFileSync(join(directory,'synthetic-metadata.json'),'utf8')) as {ownerKey:string;ownerId:string};
+const ids=new FakeIds('independent-reopen');const clock=new FakeClock();
+const core=await openCore({databasePath:join(directory,'owner.sqlite'),ai:new FakeAiPort(),transport:new MemoryTransport({network:new MemoryNetwork(),publicKey:metadata.ownerKey}),clock,ids,sessions:new FakeSession({memberId:metadata.ownerId,deviceKey:metadata.ownerKey,validUntilMs:clock.wall+100_000_000}),selectedFiles:new MemorySelectedFiles(ids),pairing:new FakePairing(ids),clockInitiallyTrusted:true});
+await core.tick();console.log(JSON.stringify(await core.app.getState({})));await core.stop();

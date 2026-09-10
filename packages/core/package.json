@@ -1,0 +1,9 @@
+{
+  "name": "@kuro/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./testing": "./src/testing.ts" },
+  "dependencies": { "@kuro/contracts": "workspace:*" },
+  "devDependencies": { "@kuro/transport": "workspace:*" }
+}
