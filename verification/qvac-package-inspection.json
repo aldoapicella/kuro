@@ -1,0 +1,50 @@
+{
+  "url": "https://registry.npmjs.org/@qvac/sdk/-/sdk-0.19.0.tgz",
+  "sha256": "ce1582673ab239a2183fbf2fd8ff7e5189ccbae45a1cc9543e7ef522929ee35d",
+  "verification": "Static package declarations inspected; no runtime execution.",
+  "contract_file": "package/dist/src/client/api/completion-stream.d.ts",
+  "findings": {
+    "responseFormat_json_schema_declared": true,
+    "strict_auto_tightening": false,
+    "schema_tool_combination_supported": false,
+    "kv_cache_false_disables_persistence": true
+  },
+  "completion_declarations": [
+    {
+      "path": "package/dist/src/utils/aggregate-events.d.ts",
+      "line": 10
+    },
+    {
+      "path": "package/dist/src/utils/aggregate-events.d.ts",
+      "line": 13
+    },
+    {
+      "path": "package/dist/examples/cancel-by-request-id.d.ts",
+      "line": 27
+    },
+    {
+      "path": "package/dist/examples/completion-stop-reason.d.ts",
+      "line": 2
+    },
+    {
+      "path": "package/dist/examples/completion-stop-reason.d.ts",
+      "line": 4
+    },
+    {
+      "path": "package/dist/examples/completion-stop-reason.d.ts",
+      "line": 21
+    },
+    {
+      "path": "package/dist/src/utils/errors-server.d.ts",
+      "line": 162
+    },
+    {
+      "path": "package/dist/src/utils/errors-server.d.ts",
+      "line": 181
+    },
+    {
+      "path": "package/dist/src/index.d.ts",
+      "line": 4
+    }
+  ]
+}
