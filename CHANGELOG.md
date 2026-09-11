@@ -26,6 +26,9 @@ describe user-visible behavior and release limits; they are not commit logs.
 - Preserves one received evidence item across lost acknowledgments, retries,
   and application restart.
 - Keeps received evidence readable when optional summary model files are absent.
+- Keeps setup, model preparation, spaces, and permissions reachable in the
+  desktop navigation. Review shows unsaved changes and requires saving the
+  passage selection and conditions before approval.
 
 ### Security
 

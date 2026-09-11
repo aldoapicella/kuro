@@ -11,14 +11,14 @@ const executablePath: string = require('electron');
 const workspace = resolve(import.meta.dirname, '../../..');
 const text = 'The KURO pilot remains provisional.';
 
-async function launch(mode: 'demo' | 'core-simulated') {
+async function launch(mode: 'demo' | 'core-simulated' | 'real') {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'kuro-desktop-ui-')));
   const entry = join(directory, 'entry.mjs');
   // Test-only entry isolates appData before loading the unchanged production host.
   await writeFile(entry, `import { app } from 'electron';\napp.setPath('appData', ${JSON.stringify(directory)});\nawait import(${JSON.stringify(pathToFileURL(join(workspace, 'build/desktop/host/main.js')).href)});\n`);
   let runtime: ElectronApplication | undefined;
   try {
-    runtime = await _electron.launch({ executablePath, args: [entry, `--mode=${mode}`], timeout: 30_000 });
+    runtime = await _electron.launch({ executablePath, args: [entry, ...(mode === 'real' ? [] : [`--mode=${mode}`])], timeout: 30_000 });
     const errors: string[] = [];
     runtime.process().stderr?.on('data', (chunk: Buffer) => { if (/Uncaught Exception|Object has been destroyed/.test(chunk.toString())) errors.push(chunk.toString()); });
     const windowCount = mode === 'core-simulated' ? 2 : 1;
@@ -36,6 +36,27 @@ async function profile(runtime: ElectronApplication, name: 'A' | 'B'): Promise<P
   for (const page of runtime.windows()) if (await page.getByText(`core-simulated · Device ${name}`, { exact: true }).count()) return page;
   throw new Error(`Missing profile ${name}`);
 }
+
+test('default real startup keeps setup and model preparation reachable before any protected workspace exists', async () => {
+  const app = await launch('real');
+  try {
+    const page = app.runtime.windows()[0]!;
+    for (const name of ['Overview', 'Setup', 'Models', 'Spaces', 'Permissions', 'Import', 'Ask', 'Reviews', 'Evidence', 'Summaries']) {
+      await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+    await expect(page.getByLabel('Device name', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Private bootstrap host', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save profile and start workspace', exact: true })).toBeVisible();
+    await expect(page.getByText(/Runtime: unconfigured/)).toBeVisible();
+    await page.getByRole('button', { name: 'Models', exact: true }).click();
+    await expect(page.getByText(/missing · 0%/)).toHaveCount(2);
+    for (const kind of ['embedding', 'summary']) await expect(page.getByRole('button', { name: `Prepare ${kind} model`, exact: true })).toBeVisible();
+    // An unconfigured installation must return to setup without a protected StateView read.
+    await page.getByRole('button', { name: 'Permissions', exact: true }).click();
+    await expect(page.getByLabel('Device name', { exact: true })).toBeVisible();
+    await expect(page.getByText(/INVALID_MESSAGE|INVALID_INPUT|Simulation active/)).toHaveCount(0);
+  } finally { await app.close(); }
+});
 
 test('real SQLite GUI requires revised consent before delivery and explicit summary', async () => {
   const app = await launch('core-simulated');
@@ -67,6 +88,7 @@ test('real SQLite GUI requires revised consent before delivery and explicit summ
     // even though this test deliberately uses simulated AI/transport/clocks.
     await app.runtime.evaluate(({ powerMonitor }) => { powerMonitor.emit('suspend'); });
     await expect(requester.getByText(text, { exact: false })).toHaveCount(0);
+    await expect(requester.getByLabel('Shared space', { exact: true })).toHaveCount(0);
     await expect(requester.getByText('Protected content paused. Reopen a view after access is restored.', { exact: true })).toBeVisible();
   } finally { await app.close(); }
 });
