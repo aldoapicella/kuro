@@ -1,0 +1,23 @@
+{
+  "name": "@kuro/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run test && node --import tsx --test test/core-integration.ts"
+  },
+  "dependencies": {
+    "@kuro/contracts": "workspace:*",
+    "@qvac/inference": "0.19.0",
+    "@qvac/sdk": "0.19.0"
+  },
+  "devDependencies": {
+    "@kuro/core": "workspace:*",
+    "@kuro/transport": "workspace:*",
+    "vitest": "2.1.9"
+  }
+}

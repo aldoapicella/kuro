@@ -6,3 +6,6 @@ allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
   - zod@4.6.1
+# Bare platform packages require this asset resolver at runtime (QVAC 0.19.0).
+publicHoistPattern:
+  - require-asset

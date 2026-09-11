@@ -10,7 +10,8 @@
     "test:contracts": "node --import tsx --test packages/contracts/test/*.test.ts",
     "test:core": "node --import tsx --test packages/core/test/*.test.ts",
     "test:transport": "pnpm --filter @kuro/transport test",
-    "test": "pnpm test:contracts && pnpm test:core && pnpm test:transport",
+    "test:ai": "pnpm --filter @kuro/ai test",
+    "test": "pnpm test:contracts && pnpm test:core && pnpm test:transport && pnpm test:ai",
     "probe:host": "node scripts/probe-host.mjs",
     "test:reference": "python3 -m unittest discover -s verification -v"
   },

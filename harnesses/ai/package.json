@@ -1,0 +1,8 @@
+{
+  "name": "@kuro/ai-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "harness": "node --import tsx run.mjs" },
+  "dependencies": { "@kuro/ai": "workspace:*", "@kuro/contracts": "workspace:*" }
+}
