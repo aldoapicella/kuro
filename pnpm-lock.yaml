@@ -45,6 +45,9 @@ importers:
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
+      node-api-headers:
+        specifier: 1.9.0
+        version: 1.9.0
 
   harnesses/ai:
     dependencies:
@@ -1618,6 +1621,9 @@ packages:
 
   nat-sampler@1.0.1:
     resolution: {integrity: sha512-yQvyNN7xbqR8crTKk3U8gRgpcV1Az+vfCEijiHu9oHHsnIl8n3x+yXNHl42M6L3czGynAVoOT9TqBfS87gDdcw==}
+
+  node-api-headers@1.9.0:
+    resolution: {integrity: sha512-2oNILP4jXwRB4ywnYKjVk1YyJ96n2D4EOVJO6S3oYZ5PtbJrw3Yt9TpAuX3nBLMuzn74rnfGQrv13pS9vC+YiA==}
 
   noise-curve-ed@2.1.0:
     resolution: {integrity: sha512-zAzJx+VwZM3w6EA1hTmDhJfvAnCeBQn/1FAeZ0LtGxCcCtlAK/uJXQVF/eDVUOaAZ286lHlx77WJ+qj9SmsRRg==}
@@ -4097,6 +4103,8 @@ snapshots:
   nanoid@3.3.18: {}
 
   nat-sampler@1.0.1: {}
+
+  node-api-headers@1.9.0: {}
 
   noise-curve-ed@2.1.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-url@2.5.4):
     dependencies:

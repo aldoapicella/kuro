@@ -66,7 +66,7 @@ export class Scheduler {
     }).catch(error => {
       const code = error instanceof KuroError ? error.code : 'INVALID_MODEL_OUTPUT';
       this.store.transaction(() => {
-        this.store.run("UPDATE jobs SET state=?,error_code=? WHERE job_id=? AND state='RUNNING'",code==='EXPIRED'?'EXPIRED':code==='CANCELLED'?'CANCELLED':'FAILED',code,job.job_id);
+        this.store.run("UPDATE jobs SET state=?,error_code=? WHERE job_id=? AND state='RUNNING'",code==='EXPIRED'?'EXPIRED':['CANCELLED','CLOCK_UNCERTAIN'].includes(code)?'CANCELLED':'FAILED',code,job.job_id);
         this.failed(job,code);
       });
     }).finally(() => { clearTimeout(timeout); this.#active = null; });

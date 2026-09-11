@@ -6,6 +6,8 @@ import { HyperDhtTransport } from '@kuro/transport';
 import { KuroError } from '@kuro/contracts';
 import type { DesktopInfo, SecretStore } from '@kuro/contracts';
 import { VerifiedPairings } from '../selections.js';
+import { LifecycleClock } from '../lifecycle-clock.js';
+import { loadNativeClock } from '../native-clock.js';
 
 export interface RealConfiguration { bootstrap: { host: string; port: number }[]; localPort?: number }
 export function readRealConfiguration(raw: unknown): RealConfiguration {
@@ -38,9 +40,11 @@ export async function createRealDesktop(directory: string, profile: 'A' | 'B', s
     closeAi = () => ai.close();
     const files = new SelectedTextFiles(), pairing = new VerifiedPairings();
     const memberId = Buffer.from(memberBytes).toString('hex');
-    const core = await openCore({ databasePath: join(directory, 'kuro.sqlite'), ai: ai.port, transport, clock: systemClock, ids: secureIds, sessions: { current: () => ({ memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }) }, selectedFiles: files, pairing, clockInitiallyTrusted: false });
-    const info: DesktopInfo = { mode: 'real', profile, memberId, publicKey: identity.publicKey, peers: [], scenario: null, clockProtection: 'closed' };
-    return { core, app: core.app, files, pairing, info, transport, ai };
+    let clock: LifecycleClock | undefined;
+    try { clock = new LifecycleClock(loadNativeClock()); } catch { /* Unqualified hosts remain explicitly closed. */ }
+    const core = await openCore({ databasePath: join(directory, 'kuro.sqlite'), ai: ai.port, transport, clock: clock ?? systemClock, ids: secureIds, sessions: { current: () => ({ memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }) }, selectedFiles: files, pairing, clockInitiallyTrusted: clock !== undefined });
+    const info: DesktopInfo = { mode: 'real', profile, memberId, publicKey: identity.publicKey, peers: [], scenario: null, clockProtection: clock ? 'native' : 'closed' };
+    return { core, app: core.app, files, pairing, info, transport, ai, clock };
   } catch (error) {
     await Promise.allSettled([transport.stop(), closeAi?.() ?? Promise.resolve()]);
     throw error;

@@ -86,7 +86,13 @@ export class CustodyCore implements CoreLifecyclePort {
   private async invoke<K extends AppCommandName>(key:K,input:AppInput<K>,fn:(input:AppInput<K>)=>AppOutputs[K]|Promise<AppOutputs[K]>):Promise<Result<AppOutputs[K]>>{
     if(!this.#running)return failure('CANCELLED');
     const parsed=AppCommands[key].safeParse(input);if(!parsed.success)return failure('INVALID_INPUT');
-    try{this.#authority.tick();return success(await fn(parsed.data as AppInput<K>));}
+    try{
+      this.#authority.tick();const epoch=this.#lifecycleEpoch;
+      const value=await fn(parsed.data as AppInput<K>);
+      this.#authority.checkClock();
+      if(epoch!==this.#lifecycleEpoch||!this.#running)throw new KuroError('CANCELLED');
+      return success(value);
+    }
     catch(error){return failure(error instanceof KuroError?error.code:'STORAGE_FAILURE');}
   }
   async start():Promise<void>{
@@ -106,9 +112,15 @@ export class CustodyCore implements CoreLifecyclePort {
   }
   suspend():void{
     this.#authority.suspend();this.#lifecycleEpoch++;
-    this.#store.transaction(()=>{for(const space of this.#authority.listSpaces())this.invalidate(space.spaceId,'stale');});
+    // Do not read the Clock while closing it. Native failure can synchronously
+    // enter this barrier from inside an authorization transaction.
+    this.#store.transaction(()=>{for(const space of this.#store.all<{space_id:string}>('SELECT space_id FROM authority_spaces'))this.invalidate(space.space_id,'stale');});
   }
-  async resume(clockIsTrusted:boolean):Promise<void>{this.#authority.resume(clockIsTrusted);}
+  async resume(clockIsTrusted:boolean):Promise<void>{
+    // A transaction interrupted by the first suspend may have rolled back its
+    // cancellation. Recommit before installing stale caches and reopening.
+    this.suspend();this.#authority.resume(clockIsTrusted);
+  }
   private invalidate(spaceId:string,reason?:'policy'|'stale'|'expired'|'denied'|'corpus'|'index'):void{
     const s=this.#store;
     const active=s.all<{job_id:string}>("SELECT job_id FROM jobs WHERE space_id=? AND state='RUNNING'",spaceId);
@@ -151,7 +163,7 @@ export class CustodyCore implements CoreLifecyclePort {
     return job.kind==='INDEX'?this.#retrieval.index(job):job.kind==='SEARCH'?this.#retrieval.search(job):this.#summaries.run(job);
   }
   private jobFailed(job:JobRow,code:string):void{
-    const state=code==='CANCELLED'||code==='STALE_REVISION'?'CANCELLED':code==='EXPIRED'?'EXPIRED':'FAILED';
+    const state=['CANCELLED','STALE_REVISION','CLOCK_UNCERTAIN'].includes(code)?'CANCELLED':code==='EXPIRED'?'EXPIRED':'FAILED';
     this.#store.run("UPDATE requests SET state=? WHERE job_id=? AND state IN ('QUEUED','RETRIEVING')",state,job.job_id);
     this.#store.run("UPDATE summaries SET state=?,error_code=? WHERE job_id=? AND state IN ('SUMMARY_PENDING','RUNNING')",state,code,job.job_id);
     if(job.kind==='INDEX'){

@@ -31,6 +31,12 @@ function invalidateProtected(): void {
  protectedRevision++; protectedSession = undefined;
  if (session) session.panel.replaceChildren(el('p', 'Protected view cleared. Reopen it to authorize the current state.', 'notice error'));
 }
+window.addEventListener('kuro:lifecycle-invalidated', () => {
+ revision++;
+ invalidateProtected();
+ reviewEdits.clear();
+ content.replaceChildren(el('p', 'Protected content paused. Reopen a view after access is restored.', 'notice'));
+});
 function protectedCurrent(token: number, expectedPage: string): boolean { return token === protectedRevision && page === expectedPage; }
 function reviewKey(review: ReviewView): string { return `${review.draftId}:${review.revision}:${review.viewDigest}`; }
 function closeProtected(panel: HTMLElement, error: unknown): void {

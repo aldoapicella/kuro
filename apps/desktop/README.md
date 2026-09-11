@@ -17,7 +17,7 @@ pnpm desktop:demo
 
 `pnpm desktop:integrated` opens profiles A (requester) and B (custodian) backed by separate SQLite databases. Ask from A, open Reviews in B, review the recipient, conditions and exact passages, approve, then open Evidence in A. AI and transport are simulated and visibly identified. Evidence reading does not start inference. Private imports are not automatically shared.
 
-`pnpm desktop:real -- --config=/absolute/path/config.json` is an integration entry point, not a validated production mode. See src/composition/real.ts for its strict configuration schema. Real startup requires local QVAC models, native adapters and OS-protected secret storage; protected operations remain closed pending validated clock/lifecycle protection. There is no fallback to fake adapters.
+`pnpm desktop:real -- --config=/absolute/path/config.json` is an integration entry point, not a validated production mode. See src/composition/real.ts for its strict configuration schema. Real startup requires local QVAC models, native adapters and OS-protected secret storage. The native clock barrier is enabled only on the qualified macOS 26.5 / Darwin 25.5.0 / build 25F71 arm64 runtime; other hosts remain closed. There is no fallback to fake adapters. [D30](../../docs/decisions/D30-native-lifecycle-barrier.md) records qualification and the separate physical wake check.
 
 ## Build, package, and probes
 
@@ -28,14 +28,18 @@ pnpm --filter @kuro/desktop start -- --probe=host
 pnpm --filter @kuro/desktop start -- --probe=runtime
 pnpm --filter @kuro/desktop start -- --probe=inference
 pnpm --filter @kuro/desktop start -- --probe=transport --config=/absolute/path/config.json
+pnpm --filter @kuro/desktop start -- --probe=lifecycle
 node apps/desktop/scripts/probe-package.mjs
+node apps/desktop/scripts/probe-package.mjs --probe=lifecycle
 ```
 
 Desktop staging uses `pnpm deploy --prod` to create an isolated production dependency tree, then restores the source workspace with its frozen lockfile. It copies the compiled public workspace exports and the transport worker beside their staged packages, replaces staged manifests rather than mutating hard-linked source manifests, and leaves native SDK dependency resolution external to bundling. Packaging retains production dependencies and rewrites copied links relative to the distribution. `probe-package.mjs` relocates the app outside the repository, rejects broken or external symlinks, runs the selected probe (host by default), and restores the distribution. It also accepts the runtime, inference, and transport probe arguments above.
 
 On Linux, the installed Chromium sandbox helper must be owned by root with mode `4755`. CI explicitly installs the pinned Electron binary before locating and configuring both development and packaged helpers. It keeps sandboxing enabled during the packaged probe.
 
-The host probe reports Electron's embedded runtime and storage capability. The runtime probe checks OS-protected secret storage with concurrent creation and reopen, loads the public QVAC adapter without fallback downloads, and closes it while authorization remains closed. The inference probe additionally embeds one synthetic identified block. The separate transport probe requires a reachable isolated bootstrap and persistent router, uses two temporary protected identities, and runs the shared five-message conformance suite through actual Bare workers, including recipient restart and clean shutdown. Use the [transport harness](../../harnesses/transport/README.md) to provision the bootstrap/router. No probe opens the core authorization gate.
+The host probe reports Electron's embedded runtime and storage capability. The runtime probe checks OS-protected secret storage with concurrent creation and reopen, loads the public QVAC adapter without fallback downloads, and closes it while authorization remains closed. The inference probe additionally embeds one synthetic identified block. The separate transport probe requires a reachable isolated bootstrap and persistent router, uses two temporary protected identities, and runs the shared five-message conformance suite through actual Bare workers, including recipient restart and clean shutdown. Use the [transport harness](../../harnesses/transport/README.md) to provision the bootstrap/router.
+
+The lifecycle probe uses the actual native Clock and two SQLite cores with explicitly simulated AI/transport and injected suspend. It opens the qualified gate, discards a pending evidence reply, resumes with stale participant authority, and verifies that a fresh synchronization restores evidence access. `--probe=lifecycle-sleep` instead waits up to 90 seconds for a physical sleep/wake while deliberately blocking JavaScript power-event dispatch. It requires the native barrier to close first. This command does not put the Mac to sleep itself. Build prerequisites on macOS include Xcode Command Line Tools; the native addon uses pinned Node-API headers and is staged beside the host bundle.
 
 ## Validation status
 
@@ -43,8 +47,8 @@ On September 11, 2026, macOS arm64 validation passed: strict typecheck, 145 Type
 
 The unsigned packaged app was relocated outside the checkout and all 943 symlinks resolved inside its distribution. Host, runtime, inference, and transport probes passed under Electron 44.3.0 / Node 24.20.0: SQLite 3.53.4, foreign keys, FTS5 and disk reopen; eight concurrent protected-secret contenders and reopened winner; actual cached GTE_LARGE_FP16 embedding with 1024 dimensions and downloads disabled; five authenticated exact-byte Bare deliveries and recipient identity restart. The distribution is approximately 5.5 GiB with the pinned SDK's native assets. This is a local development package, without signing/notarization or a physical cross-device claim.
 
-The combined two-process QVAC/Bare custody/restart test also passed (run `9270293b-c86c-4981-8be4-7bc00fec4101`). Real-mode clock/lifecycle protection remains initially untrusted: resume is conservative (`resume(false)`) until a trustworthy clock barrier is demonstrated. These probes do not establish a complete real-mode desktop workflow or suspend/resume safety.
+The combined two-process QVAC/Bare custody/restart test also passed (run `9270293b-c86c-4981-8be4-7bc00fec4101`), and passed again during lifecycle implementation (`c2750e4f-c900-4efb-aa64-a53540666db1`). The relocated native lifecycle probe passed with 10,000 actual clock samples and protected evidence recovery through fresh authority synchronization. Native generation changes, read failures and rollback latch closed synchronously; recovery repeats durable cancellation before revalidating the clock and calling `resume(true)`. Every Clock getter, asynchronous reply and renderer frame is checked. Real-mode trust is no longer permanently disabled on the qualified build. Physical sleep/wake remains a separately reported validation step.
 
-The desktop is an initial implementation. Owner membership/policy administration currently remains available through public core commands rather than dedicated renderer screens. No automatic permission grants are added by the import UI. Real mode lifecycle validation remains a release gate.
+The desktop is an initial implementation. Owner membership/policy administration currently remains available through public core commands rather than dedicated renderer screens. No automatic permission grants are added by the import UI. Full real-mode GUI custody and other platform clock implementations remain separate checks.
 
-All new UI, desktop code and test fixtures were authored for KURO; no external UI template was copied.
+All new UI, desktop code and test fixtures were authored for KURO; no external UI template was copied. The native clock addon uses public Apple APIs with implementation evidence cited in D30. `node-api-headers@1.9.0` comes from the Node.js project under the MIT license.

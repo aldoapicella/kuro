@@ -4,7 +4,7 @@ import { openCore, SelectedTextFiles, secureIds, systemClock } from '@kuro/core'
 import { FakeAiPort, FakeSession } from '@kuro/core/testing';
 import { MemoryNetwork, MemoryTransport } from '@kuro/transport';
 import { KuroError, IDSchema } from '@kuro/contracts';
-import type { AppPort, Capability, DesktopInfo, Result } from '@kuro/contracts';
+import type { AppPort, Capability, Clock, DesktopInfo, Result } from '@kuro/contracts';
 import type { CustodyCore } from '@kuro/core';
 import { VerifiedPairings } from '../selections.js';
 import { DEMO_OWNER, DEMO_REQUESTER, DEMO_TEXT } from '../fake-app.js';
@@ -17,7 +17,7 @@ const ALL: Capability[] = ['search', 'read', 'share', 'receive', 'manage'];
 export function value<T>(result: Result<T>): T { if (!result.ok) throw new KuroError(result.error.code); return result.value; }
 
 /** Real core/SQLite at both ends; deterministic AI and transport are explicitly simulated. */
-export async function createSimulatedDesktop(directory: string) {
+export async function createSimulatedDesktop(directory: string, clock: Clock = systemClock) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   // This directory is created by our host, not a renderer-selected document.
   // Canonicalize its macOS temporary-directory aliases without weakening import checks.
@@ -51,7 +51,7 @@ export async function createSimulatedDesktop(directory: string) {
       const peer = profile === 'A' ? DEMO_OWNER : DEMO_REQUESTER;
       const files = new SelectedTextFiles(), pairing = new VerifiedPairings(), ai = new FakeAiPort();
       const transport = new MemoryTransport({ network, publicKey: identity.publicKey, pairedPeers: [peer.publicKey] });
-      const core = await openCore({ databasePath: join(directory, `${profile}.sqlite`), ai, transport, clock: systemClock, ids: secureIds, sessions: new FakeSession({ memberId: identity.memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }), selectedFiles: files, pairing, clockInitiallyTrusted: true });
+      const core = await openCore({ databasePath: join(directory, `${profile}.sqlite`), ai, transport, clock, ids: secureIds, sessions: new FakeSession({ memberId: identity.memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }), selectedFiles: files, pairing, clockInitiallyTrusted: true });
       nodes.set(profile, { app: core.app, core, ai, files, pairing, info: { mode: 'core-simulated', profile, ...identity, peers: [peer], scenario: null, clockProtection: 'simulated' } });
     }
     const owner = nodes.get('B')!, requester = nodes.get('A')!;

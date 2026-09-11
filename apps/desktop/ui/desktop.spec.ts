@@ -63,6 +63,11 @@ test('real SQLite GUI requires revised consent before delivery and explicit summ
     await requester.getByRole('button', { name: /DRAFT/ }).click();
     await expect(requester.getByRole('heading', { name: /Summary draft/ })).toBeVisible();
     await expect(requester.getByRole('blockquote').filter({ hasText: text })).toBeVisible();
+    // The real preload must clear a mounted protected view when the host closes,
+    // even though this test deliberately uses simulated AI/transport/clocks.
+    await app.runtime.evaluate(({ powerMonitor }) => { powerMonitor.emit('suspend'); });
+    await expect(requester.getByText(text, { exact: false })).toHaveCount(0);
+    await expect(requester.getByText('Protected content paused. Reopen a view after access is restored.', { exact: true })).toBeVisible();
   } finally { await app.close(); }
 });
 
