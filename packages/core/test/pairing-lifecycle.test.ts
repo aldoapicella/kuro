@@ -116,3 +116,15 @@ test('same-epoch setup pairing remains available while the authorization gate is
     assert.equal(ok(await world.requester.core.app.getState({})).clockEpochValid, false);
   } finally { await world.close(); }
 });
+
+test('authority pairing stores only the pinned peer alias before a fresh projection grants anything', async () => {
+  const world = await makeWorld();
+  try {
+    const targetSpace = 'd'.repeat(32), authorityKey = 'c'.repeat(64), alias = 'e'.repeat(32);
+    const selectionId = world.requester.pairing.verify({ kind: 'authority', spaceId: targetSpace, authorityKey, spaceAlias: alias });
+    ok(await world.requester.core.app.pairSpace({ selectionId, localActions: ['read'] }));
+    const route = world.inspect('requester', `SELECT space_id,peer_key,space_alias FROM local_peer_aliases WHERE space_id='${targetSpace}'`)[0] as { space_id: string; peer_key: string; space_alias: string };
+    assert.deepEqual({ ...route }, { space_id: targetSpace, peer_key: authorityKey, space_alias: alias });
+    assert.deepEqual(await world.requester.core.app.getSpaceAdministration({ spaceId: targetSpace }), { ok: false, error: { code: 'EXPIRED', retryable: false } });
+  } finally { await world.close(); }
+});

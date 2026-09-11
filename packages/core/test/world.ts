@@ -40,7 +40,6 @@ export async function makeWorld(existingDirectory?:string){
   assert.equal(rv.syncState,'CURRENT');
   ok(await owner.core.app.setLocalPolicy({spaceId,memberId:requesterId,admitted:true,actions:ALL,validUntilMs:null,expectedRevision:view.policyEpoch}));
   ok(await requester.core.app.setLocalPolicy({spaceId,memberId:ownerId,admitted:true,actions:ALL,validUntilMs:null,expectedRevision:rv.policyEpoch}));
-  const peer=requester.pairing.verify({kind:'peer',spaceId,peerKey:ownerKey,spaceAlias:alias});ok(await requester.core.app.pairPeer({selectionId:peer}));
   const rules=[{memberId:ownerId,actions:ALL,validUntilMs:null},{memberId:requesterId,actions:['receive'] as Capability[],validUntilMs:null}];
   async function importDoc(text:string,restricted=false,targetSpace=spaceId){const result=ok(await owner.core.app.importText({spaceId:targetSpace,selectionId:owner.files.add(text),replaceDocumentId:null,expectedRevision:null,rules:restricted||targetSpace!==spaceId?[rules[0]!]:rules}));await pump();return result;}
   async function review(){ok(await requester.core.app.submitQuestion({spaceId,custodianKey:ownerKey,query:'Outstanding observations and status?',ttlSeconds:3600}));await pump();const reviews=ok(await owner.core.app.listReviews({spaceId}));assert.equal(reviews.length,1);return reviews[0]!;}

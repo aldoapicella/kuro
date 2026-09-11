@@ -30,6 +30,17 @@ become valid summaries. QVAC 0.19.0 documents an omitted completion stop reason 
 natural EOS in its bundled `completion-stop-reason` example; the SDK seam normalizes
 only that documented case, while unknown values fail closed.
 
+Because there is no repair prompt, the constrained-decoding schema must express every
+coupling `SummaryResultSchema` enforces; a shape the grammar admits but the contract
+rejects is an unrecoverable failure, not a retry. A single `status` enum beside an
+unbounded `claims` array admitted `{"status":"answer","claims":[]}`, which the contract
+rejects for a status/claim mismatch. Qwen3 1.7B emitted exactly that on an answerable
+three-source question, turning a valid retrieval into `INVALID_MODEL_OUTPUT`.
+`buildSummarySchema` now emits two `anyOf` branches, each pinning a `const` status to
+the only claim count that status permits, so the grammar cannot reach the rejected
+combination. Alias enumeration is unchanged. Claim text remains untrusted and still
+requires human semantic review.
+
 ## Validation boundary
 
 The public-port integration uses two real SQLite cores, MemoryTransport, and the real
