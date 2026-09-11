@@ -106,9 +106,25 @@ importers:
       '@kuro/contracts':
         specifier: workspace:*
         version: link:../contracts
+      bare-buffer:
+        specifier: 3.7.1
+        version: 3.7.1
+      bare-pipe:
+        specifier: 4.3.1
+        version: 4.3.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)
+      bare-runtime:
+        specifier: 1.32.0
+        version: 1.32.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-url@2.5.4)
       hyperdht:
         specifier: 6.34.0
         version: 6.34.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-url@2.5.4)
+      require-asset:
+        specifier: 1.2.2
+        version: 1.2.2(bare-url@2.5.4)
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
 
 packages:
 

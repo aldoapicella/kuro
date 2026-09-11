@@ -1,8 +1,8 @@
 # Transport harness
 
-Run `pnpm --filter @kuro/transport-harness smoke` after workspace dependencies are installed. It starts a loopback HyperDHT bootstrapper and a persistent routing node, then two separate Node processes with synthetic seeds. The shared transport conformance helper sends an authenticated D25 request to the authority, sends a correlated structurally valid `SPACE_STATE_RESPONSE ACTIVE` with the processes' actual keys and recomputed projection digest, verifies sender-key provenance and unknown-peer rejection, holds receiver observation until after send acceptance to prove that acceptance is not a durable receipt, relaunches the recipient with its same seed while the authority stays running, repeats the fresh fetch, and checks an immutable response replay.
+Run `pnpm --filter @kuro/transport-harness smoke` after workspace dependencies are installed. It starts a loopback HyperDHT bootstrapper and a persistent routing node, then two separate Node hosts, each with an actual Bare 1.32.0 HyperDHT worker and synthetic seed. The command builds the worker first. The shared transport conformance helper sends an authenticated D25 request to the authority, sends a correlated structurally valid `SPACE_STATE_RESPONSE ACTIVE` with the processes' actual keys and recomputed projection digest, verifies sender-key provenance and unknown-peer rejection, holds receiver observation until after send acceptance to prove that acceptance is not a durable receipt, relaunches the recipient with its same seed while the authority stays running, repeats the fresh fetch, and checks an immutable response replay.
 
-The macOS local-only run below passed on September 10, 2026. Its sandbox denies network egress except `localhost`; it proves the Node harness can operate against its loopback isolated bootstrap/router under that policy. It does not prove a physical LAN.
+The macOS local-only run below passed on September 10, 2026 with the earlier Node worker; it is historical egress evidence. Build the current Bare worker before repeating the direct command below. Its sandbox denies network egress except `localhost`; it proves the Node harness can operate against its loopback isolated bootstrap/router under that policy. It does not prove a physical LAN.
 
 ```sh
 /usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))' node --import tsx harnesses/transport/src/real-smoke.ts
@@ -10,7 +10,7 @@ The macOS local-only run below passed on September 10, 2026. Its sandbox denies 
 
 ## Virtual network custody workflow
 
-`src/virtual-core.ts` drives two independent persistent cores through their public ports. Run it on a Linux owner VM; it starts the owner core, an isolated bootstrap and persistent router there, and starts the requester core over SSH in a second VM. Install the frozen workspace on both VMs first. Use a dedicated test SSH key, verify the requester's host key through the trusted VM console, and disable SSH forwarding. Keep keys, source archives and state outside Git.
+`src/virtual-core.ts` drives two independent persistent cores through their public ports. Run it on a Linux owner VM; it starts the owner core, an isolated bootstrap and persistent router there, and starts the requester core over SSH in a second VM. Install the frozen workspace and run `pnpm --filter @kuro/transport build:worker` on both VMs first. Use a dedicated test SSH key, verify the requester's host key through the trusted VM console, and disable SSH forwarding. Keep keys, source archives and state outside Git.
 
 Example configuration, run from the owner VM's repository root:
 
@@ -85,7 +85,7 @@ After all peers and the dedicated SSH daemon have stopped, remove only the fixtu
 
 ## Physical LAN transport procedure
 
-Install the workspace on both devices and run the remaining commands from `harnesses/transport/` so that package imports resolve. Replace `192.168.1.20` with the stable bootstrap host's LAN address. Run a bootstrapper on that host and leave it running:
+Install the workspace and run `pnpm --filter @kuro/transport build:worker` on both devices, then run the remaining commands from `harnesses/transport/` so that package imports resolve. Replace `192.168.1.20` with the stable bootstrap host's LAN address. Run a bootstrapper on that host and leave it running:
 
 ```sh
 KURO_LAN_IP=192.168.1.20 node --input-type=module -e 'import DHT from "hyperdht"; const node = DHT.bootstrapper(49737, process.env.KURO_LAN_IP); await node.fullyBootstrapped(); await new Promise(() => {});'

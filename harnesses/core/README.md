@@ -83,9 +83,11 @@ Other commands: `state`, `revise <draft> <all|spanIds> <summary|none>`, `reviews
 
 ## VM network peer endpoint
 
-`src/network-peer.ts` is a separate JSON-lines endpoint for the virtual-network diagnostic. It opens one persistent `CustodyCore` over real HyperDHT using an explicitly ephemeral, synthetic seed and `FakeAiPort`; it is neither a QVAC nor a production identity configuration. Start it over SSH with `KURO_CORE_PEER_CONFIG` containing `stateDirectory`, a 64-hex-character `seedHex`, `pairedPeers`, `bootstrap` (`[{"host":"...","port":1234}]`), a 32-hex-character `memberId`, and optionally a fixed UDP `localPort`.
+`src/network-peer.ts` is a separate JSON-lines endpoint for local or virtual-network diagnostics. It opens one persistent `CustodyCore` over real HyperDHT in a Bare 1.32.0 worker, using an explicitly ephemeral synthetic seed. It defaults to `FakeAiPort`; set `ai: "qvac"` to inject the real local QVAC adapter through its public factory. This remains a test identity/pairing configuration in both modes. The [combined transport coordinator](../transport/README.md#combined-core-workflow-with-selectable-ai) runs the full scenario with either provider.
 
-It emits `ready` with the actual HyperDHT public key, then accepts sequential commands such as:
+Install the frozen workspace and run `pnpm --filter @kuro/transport build:worker` on every host before launching this endpoint directly. For real QVAC, follow the [AI harness prerequisites](../ai/README.md), including native runtime prerequisites and cached model files before blocking external traffic. Start it locally or over SSH with `KURO_CORE_PEER_CONFIG` containing `stateDirectory`, a 64-hex-character `seedHex`, `pairedPeers`, `bootstrap` (`[{"host":"...","port":1234}]`), a 32-hex-character `memberId`, optional `ai` (`"simulated"` or `"qvac"`), and optionally a fixed UDP `localPort`.
+
+It verifies the requested AI provider and emits `ready` with the actual HyperDHT public key and provider banner, then accepts sequential commands such as:
 
 ```json
 {"requestId":"1","action":"verify","binding":{"kind":"peer","spaceId":"...","peerKey":"...","spaceAlias":"..."}}
@@ -94,7 +96,10 @@ It emits `ready` with the actual HyperDHT public key, then accepts sequential co
 {"requestId":"4","action":"tick"}
 {"requestId":"5","action":"setDropAck","enabled":true}
 {"requestId":"6","action":"diagnostics"}
-{"requestId":"7","action":"stop"}
+{"requestId":"7","action":"setAiAvailable","available":false}
+{"requestId":"8","action":"stop"}
 ```
 
-`app` dispatches only a named public `AppCommands` method and returns its public `Result`. `approveDraft` is therefore possible only through an explicit command. `setDropAck` drops only outbound `RESPONSE_ACK` frames while recording bounded message type/digest diagnostics. No automatic tick is scheduled; the VM controller sends `tick` when it wants retries, delivery, or queue work serviced.
+`app` dispatches only a named public `AppCommands` method and returns its public `Result`. `approveDraft` is therefore possible only through an explicit command. `setDropAck` drops only outbound `RESPONSE_ACK` frames while recording bounded message type/digest diagnostics. `setAiAvailable: false` waits for current work to settle and closes the real QVAC runtime when selected; a later `true` creates a fresh real adapter. Evidence remains readable under its current permissions without invoking AI. Diagnostics include bounded AI calls and authorized rank-candidate IDs.
+
+No automatic tick is scheduled; the controller sends `tick` when it wants retries, delivery, or queue work serviced. `tick` starts eligible computation without waiting for it to finish, so the controller polls public state until the index or summary completes. `stop` cancels/stops core work, stops transport and closes AI before acknowledging. The coordinator additionally requires clean peer process exit before reporting the test complete.
