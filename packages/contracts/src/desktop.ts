@@ -12,7 +12,7 @@ export const DesktopInfoSchema = z.strictObject({
   mode: z.enum(['demo', 'core-simulated', 'real']), profile: z.enum(['A', 'B']),
   memberId: IDSchema, publicKey: KeySchema, scenario: DesktopScenarioSchema.nullable(),
   peers: z.array(z.strictObject({ memberId: IDSchema.nullable(), publicKey: KeySchema })).max(32),
-  clockProtection: z.enum(['simulated', 'closed']),
+  clockProtection: z.enum(['simulated', 'closed', 'native']),
 });
 export type DesktopInfo = z.infer<typeof DesktopInfoSchema>;
 export const DesktopCommands = {
