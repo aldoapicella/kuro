@@ -177,6 +177,10 @@ const secret = new InMemorySecretStore('ephemeral-test', new Map([['kuro.core.ha
 const baseTransport = new HyperDhtTransport({ secretStore: secret, secretName: 'kuro.core.harness.vm.seed', allowEphemeralTest: true, bootstrap: config.bootstrap, pairedPeers: config.pairedPeers, ...(config.localPort === undefined ? {} : {localPort:config.localPort}) });
 const transport = new DiagnosticTransport(baseTransport);
 const ai = new DiagnosticAiPort(config.ai);
+if ((await ai.getCapabilities()).provider !== config.ai) {
+  await ai.close();
+  throw new Error('AI adapter provider does not match the requested harness mode');
+}
 const pairing = new FakePairing(secureIds);
 const files = new MemorySelectedFiles(secureIds);
 const started = await baseTransport.start();
@@ -189,9 +193,7 @@ let stopped = false;
 async function stopAll(): Promise<void> {
   if (stopped) return;
   stopped = true;
-  try { await core.settled(); } finally {
-    try { await core.stop(); } finally { await ai.close(); }
-  }
+  try { await core.stop(); } finally { await ai.close(); }
 }
 
 try { for await (const line of createInterface({ input: process.stdin })) {
