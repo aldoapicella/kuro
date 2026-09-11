@@ -41,6 +41,13 @@ jobs:
       - run: pnpm --filter @kuro/transport-harness core-smoke
       - run: pnpm desktop:build
       - run: pnpm --filter @kuro/desktop package
+      - name: Configure Linux Chromium sandbox helpers
+        if: runner.os == 'Linux'
+        run: |
+          desktop_sandbox="$(pnpm --filter @kuro/desktop exec node -p "require('path').join(require('path').dirname(require('electron')), 'chrome-sandbox')")"
+          packaged_sandbox="build/packages/KURO-linux-$(node -p process.arch)/chrome-sandbox"
+          sudo chown root:root "$desktop_sandbox" "$packaged_sandbox"
+          sudo chmod 4755 "$desktop_sandbox" "$packaged_sandbox"
       - name: Verify packaging preserves workspace contracts and dependency manifests
         run: git diff --exit-code -- package.json pnpm-lock.yaml pnpm-workspace.yaml packages/*/package.json apps/desktop/package.json
       - name: Electron UI regression tests
