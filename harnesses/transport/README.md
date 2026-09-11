@@ -167,3 +167,8 @@ cached with the pinned checksums before the output-default-drop gates were appli
 Both external TCP controls failed before and after the complete workflow, including
 actual QVAC summary generation. These are synthetic automated workflow results;
 physical-device behavior and desktop composition remain unverified.
+
+The final shutdown checks at `9981d64` also passed with actual QVAC in the virtual
+network (run `58cc951f-d214-4773-9421-a7ed4cbcb929`). A peer must acknowledge stop
+and exit 0; the coordinator closes its command pipe and treats forced termination
+as failure. `complete` is printed only after peers, router and bootstrapper close.

@@ -89,6 +89,19 @@ minimal guest also required `libatomic1` for the SDK worker's RocksDB native dep
 This closes the virtual offline-network integration check using one shared kernel;
 it is not a two-VM, physical-device or desktop-packaging result.
 
+Final shutdown review required a stop acknowledgment and actual exit 0 before the
+coordinator can print `complete`. A local repeat had timed out after restart; the
+stricter checks then exposed a peer command pipe left open after acknowledged stop.
+Closing that pipe fixed the demonstrated shutdown hang. The final `9981d64` code
+passed three complete local simulated-AI/real-transport runs and one additional
+actual-QVAC virtual run (`58cc951f-d214-4773-9421-a7ed4cbcb929`, exit 0), including
+clean peer/router/bootstrap teardown. Six targeted child-process fixtures covered
+clean exit, EOF-dependent exit, nonzero exit, missing acknowledgment, forced kill
+and spawn failure. The earlier reconnect timeout's exact cause was not independently
+established; it did not recur in those final runs. External controls remained blocked
+and no peer process remained after the virtual run. The dedicated SSH daemon and VM
+were stopped, with test evidence retained outside Git.
+
 ## Provenance
 
 QVAC SDK and inference 0.19.0 are Apache-2.0 dependencies from `tetherto/qvac`.
