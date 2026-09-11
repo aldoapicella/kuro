@@ -6,8 +6,10 @@ declare global { interface Window { kuro: DesktopBridge } }
 const { app, host } = window.kuro;
 const root = document.querySelector<HTMLDivElement>('#app')!;
 function el(tag: string, text = '', className = ''): HTMLElement { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; }
+function hidden(tag: string, text: string, className = ''): HTMLElement { const node = el(tag, text, className); node.setAttribute('aria-hidden', 'true'); return node; }
 function button(text: string, action: () => Promise<void>): HTMLButtonElement { const b = document.createElement('button'); b.textContent = text; b.className = 'list-item'; b.onclick = () => { b.disabled = true; void action().catch(showError).finally(() => { b.disabled = false; }); }; return b; }
 function unwrap<T>(r: Result<T>): T { if (!r.ok) throw new Error(r.error.code); return r.value; }
+function metric(label: string, value: number): HTMLElement { const node = el('div', '', 'metric'); node.append(el('div', label, 'metric-label'), el('div', String(value), 'metric-value')); return node; }
 const notice = el('div', '', 'notice hidden'); notice.setAttribute('role', 'status');
 function showNotice(message: string): void { notice.className = 'notice'; notice.textContent = message; }
 const errorExplanation: Record<string, string> = {
@@ -38,11 +40,17 @@ type ProtectedSession = {
 type ReviewEdits = { selectedSpanIds: string[]; allowLocalSummary: boolean };
 let protectedSession: ProtectedSession | undefined;
 const reviewEdits = new Map<string, ReviewEdits>();
-const layout = el('div', '', 'layout'), sidebar = el('aside', '', 'sidebar'), workspace = el('div', '', 'workspace'), content = el('main', '', 'main');
-sidebar.append(el('div', 'KURO', 'brand'), el('p', 'Private knowledge, shared carefully', 'brand-subtitle'));
-for (const name of ['Overview', 'Setup', 'Models', 'Spaces', 'Permissions', 'Import', 'Ask', 'Reviews', 'Evidence', 'Summaries']) {
- const b = button(name, async () => { page = name; await render(); }); b.className = 'nav-button'; sidebar.append(b);
+const pages = ['Overview', 'Setup', 'Models', 'Spaces', 'Permissions', 'Import', 'Ask', 'Reviews', 'Evidence', 'Summaries'];
+const layout = el('div', '', 'layout'), sidebar = el('aside', '', 'sidebar'), workspace = el('div', '', 'workspace'), topbar = el('header', '', 'topbar'), content = el('main', '', 'main');
+const nav = el('nav', '', 'nav');
+const navButtons = new Map<string, HTMLButtonElement>();
+const brand = el('div', '', 'brand'); brand.append(hidden('span', 'K', 'brand-mark'), el('span', 'KURO'));
+sidebar.append(brand, el('p', 'Private knowledge, shared carefully', 'brand-subtitle'), el('div', 'Workspace', 'section-label'));
+for (const name of pages) {
+ const b = button(name, async () => { page = name; await render(); }); b.className = 'nav-button'; navButtons.set(name, b); nav.append(b);
 }
+const sidebarNote = el('div', '', 'sidebar-note'); sidebarNote.append(el('strong', 'Source custody'), el('p', 'Original documents and indexes never leave this device. Only passages a reviewer approves are sent.'));
+sidebar.append(nav, sidebarNote);
 
 function capsInput(initial: Capability[] = [], label = 'Capabilities', allowed: Capability[] = capabilities): { node: HTMLElement; value: () => Capability[] } {
  const checks = new Map<Capability, HTMLInputElement>(); const node = document.createElement('fieldset'); node.className = 'checkbox-row'; const legend = el('legend', label); node.append(legend);
@@ -60,7 +68,14 @@ function bindingText(binding: { kind: string; spaceId: string; spaceAlias: strin
 }
 function selected(spaceId: string): SpaceView | undefined { return currentState?.spaces.find(space => space.spaceId === spaceId); }
 let currentState: Awaited<ReturnType<typeof app.getState>> extends Result<infer T> ? T | undefined : never;
-workspace.append(notice, content); layout.append(sidebar, workspace); root.replaceChildren(layout);
+workspace.append(notice, topbar, content); layout.append(sidebar, workspace); root.replaceChildren(layout);
+function markActivePage(): void {
+ for (const [name, item] of navButtons) {
+  const active = name === page;
+  item.classList.toggle('active', active);
+  if (active) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
+ }
+}
 function showRefreshNeeded(): void { notice.className = 'notice'; notice.replaceChildren(document.createTextNode('Changes were committed elsewhere. '), button('Refresh page', async () => { adminFormDirty = false; await render(); })); }
 content.addEventListener('input', () => { if (['Spaces', 'Permissions'].includes(page)) adminFormDirty = true; });
 content.addEventListener('change', () => { if (['Spaces', 'Permissions'].includes(page)) adminFormDirty = true; });
@@ -80,6 +95,7 @@ window.addEventListener('kuro:lifecycle-invalidated', () => {
  revision++;
  invalidateProtected();
  reviewEdits.clear();
+ topbar.replaceChildren(el('div', 'Private workspace', 'topbar-left'));
  content.replaceChildren(el('p', 'Protected content paused. Reopen a view after access is restored.', 'notice'));
 });
 function protectedCurrent(token: number, expectedPage: string): boolean { return token === protectedRevision && page === expectedPage; }
@@ -135,7 +151,9 @@ async function reauthorizeProtected(): Promise<void> {
 }
 
 async function render(): Promise<void> {
+ if (refreshPending) { notice.className = 'notice hidden'; notice.replaceChildren(); }
  adminFormDirty = false; refreshPending = false;
+ markActivePage();
  invalidateProtected();
  if (['Reviews', 'Evidence', 'Summaries'].includes(page)) content.replaceChildren(el('p', 'Authorizing protected content…'));
  const token = ++revision;
@@ -157,14 +175,18 @@ async function render(): Promise<void> {
  if (token !== revision) return;
  if (!state.spaces.some(s => s.spaceId === selectedSpace)) selectedSpace = state.spaces[0]?.spaceId ?? '';
  const header = el('div', '', 'page-heading'); header.append(el('h1', page), el('p', `${info.mode} · Device ${info.profile}`, 'badge'));
- const select = document.createElement('select'); select.setAttribute('aria-label', 'Shared space');
+ const select = document.createElement('select'); select.className = 'space-select'; select.setAttribute('aria-label', 'Shared space');
  for (const space of state.spaces) { const o = document.createElement('option'); o.value = space.spaceId; o.textContent = `${space.isOwner ? 'Owner' : 'Participant'} · ${space.spaceId.slice(0, 8)} · ${space.syncState}`; select.append(o); }
  select.value = selectedSpace; select.onchange = () => { selectedSpace = select.value; void render().catch(showError); };
- content.replaceChildren(header, select);
- if (info.mode !== 'real') content.append(el('p', 'Simulation active: AI and network results do not demonstrate real inference or cross-device delivery.', 'notice'));
+ const workspaceLabel = el('div', '', 'topbar-left'); workspaceLabel.append(hidden('span', '', 'status-dot'), el('span', 'Private workspace'));
+ topbar.replaceChildren(workspaceLabel, select);
+ content.replaceChildren(header);
+ if (info.mode === 'core-simulated' && info.aiProvider === 'qvac') content.append(el('p', 'Actual QVAC models run locally on this device. The network and identities are simulated, so this does not demonstrate cross-device delivery.', 'notice'));
+ else if (info.mode !== 'real') content.append(el('p', 'Simulation active: AI and network results do not demonstrate real inference or cross-device delivery.', 'notice'));
  if (!state.clockEpochValid) content.append(el('p', 'CLOCK_UNCERTAIN: protected actions are paused. Restore the device clock or resume the workspace, then refresh this shared space.', 'notice error'));
  const panel = el('section', '', 'panel stack'); content.append(panel);
  if (page === 'Overview') {
+  const metrics = el('div', '', 'metrics'); metrics.append(metric('Documents', state.documents.length), metric('Requests', state.requests.length), metric('Evidence bundles', state.evidenceIds.length), metric('Summary drafts', state.summaries.length)); panel.append(metrics);
   panel.append(el('h2', 'Your local workspace'), el('p', `${state.documents.length} documents · ${state.requests.length} requests · ${state.evidenceIds.length} evidence bundles`));
   if (selectedSpace) panel.append(button('Refresh shared space', async () => { unwrap(await app.refreshSpace({ spaceId: selectedSpace })); await render(); }));
   else panel.append(el('p', 'Create or pair a shared space to begin.', 'notice'));
@@ -220,6 +242,8 @@ async function render(): Promise<void> {
 }
 
 function renderRecovery(setup: DesktopSetup): void {
+ markActivePage();
+ topbar.replaceChildren(el('div', 'Private workspace', 'topbar-left'));
  if (page === 'Models') {
   const heading = el('div', '', 'page-heading'); heading.append(el('h1', 'Models'), el('p', `Runtime ${setup.runtime}`, 'badge'));
   const panel = el('section', '', 'panel stack'); content.replaceChildren(heading, panel); renderModels(setup, panel); return;
@@ -341,7 +365,7 @@ async function renderPermissions(panel: HTMLElement, state: NonNullable<typeof c
 
 function showReview(review: ReviewView, panel: HTMLElement, token: number): void {
  if (!protectedCurrent(token, 'Reviews')) return;
- panel.replaceChildren(el('h2', review.question), el('p', `Recipient: ${review.recipientKey}`), el('p', `Coverage: ${review.coverage} · Expires: ${new Date(review.expiresAtMs).toISOString()}`), el('p', `Review revision ${review.revision} · digest ${review.viewDigest}`, 'small'));
+ panel.replaceChildren(el('div', 'Review exact evidence before delivery', 'eyebrow'), el('h2', review.question), el('p', `Recipient: ${review.recipientKey}`), el('p', `Coverage: ${review.coverage} · Expires: ${new Date(review.expiresAtMs).toISOString()}`), el('p', `Review revision ${review.revision} · digest ${review.viewDigest}`, 'small'));
  const saved = reviewEdits.get(reviewKey(review));
  const selected = new Set(saved?.selectedSpanIds ?? review.selectedSpanIds);
  const allowSummary = document.createElement('input'); allowSummary.type = 'checkbox'; allowSummary.setAttribute('aria-label', 'Allow requester-local summary'); allowSummary.checked = saved?.allowLocalSummary ?? review.conditions.allowLocalSummary;
@@ -350,9 +374,14 @@ function showReview(review: ReviewView, panel: HTMLElement, token: number): void
   try { unwrap(await app.approveDraft({ draftId: review.draftId, expectedRevision: review.revision, reviewedViewDigest: review.viewDigest })); await render(); }
   catch (error) { if (protectedCurrent(token, 'Reviews')) { invalidateProtected(); closeProtected(panel, error); } }
  });
- approval.disabled = selected.size !== review.selectedSpanIds.length || review.selectedSpanIds.some(id => !selected.has(id)) || allowSummary.checked !== review.conditions.allowLocalSummary;
+ const unsaved = el('p', 'Unsaved changes. Save the selection and conditions before approving.', 'helper hidden');
+ const updateApproval = (): void => {
+  const unchanged = selected.size === review.selectedSpanIds.length && !review.selectedSpanIds.some(id => !selected.has(id)) && allowSummary.checked === review.conditions.allowLocalSummary;
+  approval.disabled = !unchanged;
+  unsaved.className = unchanged ? 'helper hidden' : 'helper';
+ };
  const persistEdits = () => reviewEdits.set(reviewKey(review), { selectedSpanIds: [...selected], allowLocalSummary: allowSummary.checked });
- const markChanged = () => { persistEdits(); approval.disabled = true; };
+ const markChanged = () => { persistEdits(); unsaved.className = 'helper'; approval.disabled = true; };
  for (const passage of review.passages) {
   const label = el('label', '', 'source'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = selected.has(passage.ref.spanId);
   checkbox.onchange = () => { if (checkbox.checked) selected.add(passage.ref.spanId); else selected.delete(passage.ref.spanId); markChanged(); };
@@ -361,7 +390,8 @@ function showReview(review: ReviewView, panel: HTMLElement, token: number): void
  const conditionsLabel = el('label', 'Processing conditions', 'source');
  allowSummary.onchange = markChanged;
  conditionsLabel.append(allowSummary, el('span', 'Permit the requester to make a local summary from this approved evidence.'));
- panel.append(conditionsLabel, el('p', `Conditions: ${JSON.stringify({ ...review.conditions, allowLocalSummary: allowSummary.checked })}`));
+ const conditions = el('p', `Conditions: ${JSON.stringify({ ...review.conditions, allowLocalSummary: allowSummary.checked })}`, 'review-summary');
+ panel.append(conditionsLabel, conditions);
  panel.append(button('Save passage selection and conditions', async () => {
   if (!protectedCurrent(token, 'Reviews')) return;
   persistEdits();
@@ -371,7 +401,8 @@ function showReview(review: ReviewView, panel: HTMLElement, token: number): void
    if (protectedCurrent(token, 'Reviews')) showReview(updated, panel, token);
   } catch (error) { if (protectedCurrent(token, 'Reviews')) { invalidateProtected(); closeProtected(panel, error); } }
  }));
- panel.append(approval);
+ panel.append(unsaved, approval);
+ updateApproval();
 }
 
 let protectedValidationPending = false;

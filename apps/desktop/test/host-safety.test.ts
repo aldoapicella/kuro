@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KuroError, success, failure } from '@kuro/contracts';
+import { KuroError, success, failure, DesktopInfoSchema } from '@kuro/contracts';
 import type { CoreLifecyclePort, VerifiedBinding } from '@kuro/contracts';
 import { FakeAppPort } from '../src/fake-app.js';
 import { unavailableSetup } from '../src/setup-unavailable.js';
@@ -11,9 +11,29 @@ import { DesktopLifecycle } from '../src/lifecycle.js';
 import { routeCall, trustedSender } from '../src/ipc-router.js';
 import { ProtectedSecretStore } from '../src/secret-store.js';
 import { formatBindingVerification } from '../src/selections.js';
+import { ProfileRuntime } from '../src/profile-runtime.js';
 
 const lifecycleCore = (overrides: Partial<CoreLifecyclePort> = {}): CoreLifecyclePort => ({
   start: async () => {}, stop: async () => {}, suspend: () => {}, resume: async () => {}, tick: async () => {}, ...overrides,
+});
+
+test('unconfigured real profiles provide valid startup metadata without opening an identity', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'kuro-unconfigured-'));
+  const secrets = { protection: async () => 'unavailable' as const, read: async () => { throw new Error('Unexpected identity read'); }, createIfAbsent: async () => { throw new Error('Unexpected identity creation'); } };
+  try {
+    for (const profile of ['A', 'B'] as const) {
+      const runtime = new ProfileRuntime(directory, profile, secrets, '0.1.0-preview.1', () => {});
+      await runtime.load();
+      const info = DesktopInfoSchema.parse(runtime.info);
+      assert.equal(info.mode, 'real');
+      assert.equal(info.aiProvider, 'qvac');
+      assert.equal(info.profile, profile);
+      assert.equal(info.clockProtection, 'closed');
+      assert.deepEqual(info.peers, []);
+      assert.equal(runtime.running, false);
+      await runtime.stop();
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('IPC trust requires the bound main frame and exact URL', () => {

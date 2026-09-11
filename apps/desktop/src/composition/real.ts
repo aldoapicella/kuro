@@ -45,7 +45,7 @@ export async function createRealDesktop(directory: string, profile: 'A' | 'B', s
     let clock: LifecycleClock | undefined;
     try { clock = new LifecycleClock(loadNativeClock()); } catch { /* Unqualified hosts remain explicitly closed. */ }
     const core = await openCore({ databasePath: join(directory, 'kuro.sqlite'), ai: ai.port, transport, clock: clock ?? systemClock, ids: secureIds, sessions: { current: () => ({ memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }) }, selectedFiles: files, pairing, clockInitiallyTrusted: clock !== undefined });
-    const info: DesktopInfo = { mode: 'real', profile, memberId, publicKey: identity.publicKey, peers: [], scenario: null, clockProtection: clock ? 'native' : 'closed' };
+    const info: DesktopInfo = { mode: 'real', profile, memberId, publicKey: identity.publicKey, peers: [], scenario: null, clockProtection: clock ? 'native' : 'closed', aiProvider: 'qvac' };
     return { core, app: core.app, files, pairing, info, transport, ai, clock };
   } catch (error) {
     await Promise.allSettled([transport.stop(), closeAi?.() ?? Promise.resolve()]);

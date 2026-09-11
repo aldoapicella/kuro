@@ -15,6 +15,7 @@
     "desktop:build": "pnpm build && pnpm --filter @kuro/desktop build",
     "desktop:demo": "pnpm desktop:build && pnpm --filter @kuro/desktop start --mode=demo",
     "desktop:integrated": "pnpm desktop:build && pnpm --filter @kuro/desktop start --mode=core-simulated",
+    "desktop:qvac": "pnpm desktop:build && pnpm --filter @kuro/desktop start --mode=core-simulated --ai=qvac",
     "desktop:real": "pnpm desktop:build && pnpm --filter @kuro/desktop start --mode=real",
     "desktop:package": "pnpm desktop:build && pnpm --filter @kuro/desktop package",
     "test:desktop": "node --import tsx --test apps/desktop/test/*.test.ts tests/integration/desktop.test.ts",

@@ -95,7 +95,7 @@ export class FakeAppPort {
     };
     this.reset('ready');
   }
-  info(): DesktopInfo { return { mode: 'demo', profile: this.profile, ...DEMO_REQUESTER, scenario: this.scenario, peers: [DEMO_OWNER], clockProtection: 'simulated' }; }
+  info(): DesktopInfo { return { mode: 'demo', profile: this.profile, ...DEMO_REQUESTER, scenario: this.scenario, peers: [DEMO_OWNER], clockProtection: 'simulated', aiProvider: 'simulated' }; }
   reset(scenario: DesktopScenario): void {
     this.scenario = scenario; this.reviews.clear(); this.evidence.clear(); this.summaries.clear();
     const space = this.newSpace(demoId(1));
