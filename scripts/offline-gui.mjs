@@ -26,6 +26,7 @@ const captureSource = join(workspace, 'scripts/offline-vlan-evidence.sh');
 await access(archive); await mkdir(evidence, { recursive: true, mode: 0o700 });
 await Promise.all([driverSource, pfSource, captureSource].map(path => access(path)));
 const liveDrivers = new Set();
+const unverifiedNativeProbeCleanup = new Set();
 let capturesStarted = false;
 const gatesInstalled = new Set();
 const driverSha256 = await sha256(driverSource);
@@ -75,6 +76,7 @@ async function main() { try {
 } finally {
   const cleanup = [
     ...(capturesStarted ? await Promise.allSettled(['owner', 'requester'].map(stopCapture)) : []),
+    ...(unverifiedNativeProbeCleanup.size ? [{ status: 'rejected', reason: new Error('Native probe cleanup was not verified.') }] : []),
     ...await Promise.allSettled([...drivers()].map(driver => driver.stop())),
     ...await Promise.allSettled([...gatesInstalled].map(removeGate)),
   ];
@@ -135,14 +137,13 @@ function validate(config) {
   if (config.owner.peerIp === config.requester.peerIp) throw new Error('Virtual LAN peers need distinct guest IP addresses');
 }
 async function qualify(peer) {
-  const executable = shellQuote(join(guestAppPath(peer), 'Contents/MacOS/kuro'));
-  const lifecycleData = shellQuote(join(peer.guestRunRoot, 'native-lifecycle'));
-  const runtimeData = shellQuote(join(peer.guestRunRoot, 'native-runtime'));
+  const lifecycleData = join(peer.guestRunRoot, 'native-lifecycle');
+  const runtimeData = join(peer.guestRunRoot, 'native-runtime');
   const platform = await remote(peer, 'sw_vers; uname -srm');
   if (!/ProductVersion:\s*26\.5/.test(platform) || !/BuildVersion:\s*25F71/.test(platform) || !/Darwin 25\.5\.0 arm64/.test(platform)) throw new Error(`${peer.instance} is not qualified`);
-  const lifecycleOutput = await runPhase(`${peer.instance}.native-lifecycle`, () => guiSession(peer, `${executable} --probe=lifecycle --user-data-dir=${lifecycleData}`, 180_000));
+  const lifecycleOutput = await runPhase(`${peer.instance}.native-lifecycle`, () => runNativeProbe(peer, 'lifecycle', lifecycleData));
   await saveProbeEvidence(peer, 'lifecycle', lifecycleOutput);
-  const runtimeOutput = await runPhase(`${peer.instance}.native-runtime`, () => guiSession(peer, `${executable} --probe=runtime --user-data-dir=${runtimeData}`, 180_000));
+  const runtimeOutput = await runPhase(`${peer.instance}.native-runtime`, () => runNativeProbe(peer, 'runtime', runtimeData));
   await saveProbeEvidence(peer, 'runtime', runtimeOutput);
   const lifecycle = probeResult(lifecycleOutput, 'lifecycle');
   const runtime = probeResult(runtimeOutput, 'runtime');
@@ -393,15 +394,82 @@ async function collectPacketEvidence() {
 async function remote(peer, command) {
   const { stdout, stderr } = await execFile('ssh', [...sshArgs(peer), command], { maxBuffer: 4 * 1024 * 1024, timeout: 120_000 }); return `${stdout}${stderr}`;
 }
-async function guiSession(peer, command, timeout = 120_000) {
-  const { stdout, stderr } = await execFile('ssh', [...sshArgs(peer), guiSessionCommand(peer, command)], { maxBuffer: 4 * 1024 * 1024, timeout });
+async function guiSession(peer, command, timeout = 120_000, { cleanupMarker = null } = {}) {
+  const { stdout, stderr } = await execFile('ssh', [...sshArgs(peer), guiSessionCommand(peer, command, cleanupMarker)], { maxBuffer: 4 * 1024 * 1024, timeout });
   return `${stdout}${stderr}`;
 }
-function guiSessionCommand(peer, command) {
+async function runNativeProbe(peer, probe, userDataDirectory, { executablePath = join(guestAppPath(peer), 'Contents/MacOS/kuro'), timeout = 180_000 } = {}) {
+  if (!['lifecycle', 'runtime'].includes(probe)) throw new Error('Native probe is invalid');
+  if (!isAbsolute(executablePath) || !isAbsolute(userDataDirectory)) throw new Error('Native probe executable and user-data paths must be absolute');
+  if (!inside(peer.guestRunRoot, executablePath) || !inside(peer.guestRunRoot, userDataDirectory)) throw new Error('Native probe paths must remain under guestRunRoot');
+  if (!Number.isSafeInteger(timeout) || timeout < 1_000) throw new Error('Native probe timeout is invalid');
+  const helperCleanupMarker = `KURO_NATIVE_PROBE_HELPER_CLEANUP:${randomUUID()}`;
+  const groupCleanupMarker = `KURO_NATIVE_PROBE_GROUP_CLEANUP:${randomUUID()}`;
+  const cleanupMarkers = [helperCleanupMarker, groupCleanupMarker];
+  unverifiedNativeProbeCleanup.add(helperCleanupMarker);
+  const supervisor = nativeProbeSupervisorScript({ executablePath, probe, userDataDirectory, timeout, groupCleanupMarker });
+  const command = `${shellQuote(peer.guestNodePath)} -e ${shellQuote(supervisor)}`;
+  try {
+    const output = await guiSession(peer, command, timeout + 10_000, { cleanupMarker: helperCleanupMarker });
+    return verifiedNativeProbeOutput(output, cleanupMarkers);
+  } catch (error) {
+    const output = `${typeof error?.stdout === 'string' ? error.stdout : ''}${typeof error?.stderr === 'string' ? error.stderr : ''}`;
+    if (hasCleanupMarkers(output, cleanupMarkers)) unverifiedNativeProbeCleanup.delete(helperCleanupMarker);
+    throw error;
+  }
+}
+function verifiedNativeProbeOutput(output, cleanupMarkers) {
+  if (!hasCleanupMarkers(output, cleanupMarkers)) throw new Error('Native probe cleanup was not verified');
+  unverifiedNativeProbeCleanup.delete(cleanupMarkers[0]);
+  return output.split('\n').filter(line => !cleanupMarkers.includes(line)).join('\n');
+}
+function hasCleanupMarkers(output, cleanupMarkers) {
+  const lines = new Set(output.split('\n'));
+  return cleanupMarkers.every(marker => lines.has(marker));
+}
+function nativeProbeSupervisorScript({ executablePath, probe, userDataDirectory, timeout, groupCleanupMarker }) {
+  const target = JSON.stringify({ executable: executablePath, args: [`--probe=${probe}`, `--user-data-dir=${userDataDirectory}`], timeout, groupCleanupMarker });
+  return `const { spawn } = require('node:child_process');
+const target = ${target};
+let child, timer, finishing = false, groupCreated = false;
+const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+function groupExists() { try { process.kill(-child.pid, 0); return true; } catch (error) { if (error && error.code === 'ESRCH') return false; throw error; } }
+async function stopGroup() {
+  if (!child || !child.pid || !groupExists()) return true;
+  for (const signal of ['SIGTERM', 'SIGKILL']) {
+    try { process.kill(-child.pid, signal); } catch (error) { if (!error || error.code !== 'ESRCH') throw error; }
+    for (let attempt = 0; attempt < (signal === 'SIGTERM' ? 10 : 20); attempt += 1) { await pause(100); if (!groupExists()) return true; }
+  }
+  return !groupExists();
+}
+async function finish(code) {
+  if (finishing) return;
+  finishing = true; clearTimeout(timer);
+  try {
+    if (!groupCreated || !await stopGroup()) { process.exitCode = 70; return; }
+    try { process.stdout.write(target.groupCleanupMarker + '\\n'); } catch { process.exitCode = 70; return; }
+    process.exitCode = code;
+  } catch { process.exitCode = 70; }
+}
+try {
+  child = spawn(target.executable, target.args, { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  groupCreated = Boolean(child.pid);
+  child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr);
+  const fail = () => { void finish(70); };
+  child.on('error', fail); child.stdout.on('error', fail); child.stderr.on('error', fail);
+  process.stdout.on('error', fail); process.stderr.on('error', fail);
+  child.once('exit', code => { void finish(code === 0 ? 0 : 1); });
+  timer = setTimeout(() => { void finish(124); }, target.timeout);
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(signal, () => { void finish(143); });
+} catch { void finish(70); }`;
+}
+function guiSessionCommand(peer, command, cleanupMarker = null) {
   const helperDirectory = shellQuote(dirname(guestDriverPath(peer)));
   const credential = shellQuote(peer.sudoCredentialPath);
   const content = `#!/bin/sh\nset -eu\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\nexport PATH\ncredential=${credential}\ntest -f "$credential"\ntest ! -L "$credential"\nowner=$(stat -f %Su "$credential")\nmode=$(stat -f %Lp "$credential")\nsize=$(stat -f %z "$credential")\ntest "$owner" = "$(id -un)"\n{ test "$mode" = 400 || test "$mode" = 600; }\ntest "$size" -gt 0\ntest "$size" -le 128\nexec /bin/cat "$credential"\n`;
-  const wrapper = `set -eu; PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; ssh_user=$(id -un); ssh_uid=$(id -u); test "$ssh_uid" -ne 0; console_user=$(stat -f %Su /dev/console); test "$console_user" = "$ssh_user"; console_uid=$(id -u "$console_user"); test "$console_uid" = "$ssh_uid"; helper_directory=${helperDirectory}; test -d "$helper_directory"; test ! -L "$helper_directory"; test "$(stat -f %Su "$helper_directory")" = "$ssh_user"; directory_mode=$(stat -f %Lp "$helper_directory"); case "$directory_mode" in *[!0-7]*|'') exit 1;; esac; test $((0$directory_mode & 022)) -eq 0; helper=$(umask 077; mktemp "$helper_directory/sudo-askpass.XXXXXX"); trap 'rm -f "$helper"' 0 HUP INT TERM; printf %s ${shellQuote(content)} > "$helper"; chmod 700 "$helper"; test -f "$helper"; test ! -L "$helper"; test "$(stat -f %Su "$helper")" = "$ssh_user"; test "$(stat -f %Lp "$helper")" = 700; SUDO_ASKPASS="$helper" /usr/bin/sudo -A -k /bin/launchctl asuser "$console_uid" /usr/bin/sudo -n -H -u "$ssh_user" /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin ${command}; rm -f "$helper"; test ! -e "$helper"; test ! -L "$helper"; trap - 0 HUP INT TERM`;
+  const marker = cleanupMarker === null ? ':' : `printf '%s\n' ${shellQuote(cleanupMarker)}`;
+  if (cleanupMarker !== null && !/^KURO_NATIVE_PROBE_HELPER_CLEANUP:[0-9a-f-]{36}$/.test(cleanupMarker)) throw new Error('Native probe cleanup marker is invalid');
+  const wrapper = `set -eu; PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; ssh_user=$(id -un); ssh_uid=$(id -u); test "$ssh_uid" -ne 0; console_user=$(stat -f %Su /dev/console); test "$console_user" = "$ssh_user"; console_uid=$(id -u "$console_user"); test "$console_uid" = "$ssh_uid"; helper_directory=${helperDirectory}; test -d "$helper_directory"; test ! -L "$helper_directory"; test "$(stat -f %Su "$helper_directory")" = "$ssh_user"; directory_mode=$(stat -f %Lp "$helper_directory"); case "$directory_mode" in *[!0-7]*|'') exit 1;; esac; test $((0$directory_mode & 022)) -eq 0; helper=$(umask 077; mktemp "$helper_directory/sudo-askpass.XXXXXX"); trap 'rm -f "$helper"' 0 HUP INT TERM; printf %s ${shellQuote(content)} > "$helper"; chmod 700 "$helper"; test -f "$helper"; test ! -L "$helper"; test "$(stat -f %Su "$helper")" = "$ssh_user"; test "$(stat -f %Lp "$helper")" = 700; target_status=0; set +e; SUDO_ASKPASS="$helper" /usr/bin/sudo -A -k /bin/launchctl asuser "$console_uid" /usr/bin/sudo -n -H -u "$ssh_user" /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin ${command}; target_status=$?; set -e; rm -f "$helper"; test ! -e "$helper"; test ! -L "$helper"; ${marker}; trap - 0 HUP INT TERM; exit "$target_status"`;
   return `/bin/sh -c ${shellQuote(wrapper)}`;
 }
 function sshConnectionOptions(peer) { return ['-F', peer.sshConfig, '-o', 'BatchMode=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none']; }
@@ -533,7 +601,7 @@ function isDirectEntry() {
   catch { return false; }
 }
 if (isDirectEntry()) await main();
-export { guiSessionCommand, qualify, scpTransferArgs };
+export { guiSessionCommand, nativeProbeSupervisorScript, qualify, runNativeProbe, scpTransferArgs };
 async function sha256(path) { const hash = createHash('sha256'); for await (const chunk of createReadStream(path)) hash.update(chunk); return hash.digest('hex'); }
 async function manifestInArchive(path) {
   const manifest = 'KURO-darwin-arm64/KURO.app/Contents/Resources/app/package.json';

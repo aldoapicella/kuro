@@ -59,6 +59,12 @@ system-only `PATH`. The helper is removed and checked after its target command
 exits, including the persistent driver's lifetime. It does not send a password
 through the driver's NDJSON input or put one in arguments,
 environment variables, or evidence.
+Each native probe runs under a bounded, detached process-group supervisor.
+A timeout or failure sends TERM then KILL only to that probe group, which
+includes its Electron helper processes. The coordinator accepts a probe result
+only after group absence and GUI-session removal of its exact temporary askpass
+helper each emit a distinct cleanup verification. It does not act on SecurityAgent; an
+unavailable Keychain authorization remains a failed qualification.
 
 The private `offlineConfiguration` JSON contains `limaHome` and two objects,
 `owner` and `requester`, with these fields:
