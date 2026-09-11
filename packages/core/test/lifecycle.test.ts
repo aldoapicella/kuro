@@ -173,6 +173,33 @@ test('cancellation releases no slot before the native provider settles and late 
   }finally{release?.();await w.close();}
 });
 
+test('request expiry cancels native work and records an expired job',async()=>{
+  const w=await makeWorld();let release:(()=>void)|undefined;
+  try{
+    await w.importDoc('Outstanding observations pending.');
+    w.owner.ai.beforeOperation=async(method)=>{if(method==='embedBlocks')await new Promise<void>(resolve=>{release=resolve;});};
+    ok(await w.requester.core.app.submitQuestion({spaceId:w.spaceId,custodianKey:w.owner.key,query:'Outstanding?',ttlSeconds:1}));
+    await w.requester.core.tick();w.network.flush();await w.owner.core.tick();await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(w.inspect('owner',"SELECT count(*) n FROM jobs WHERE state='RUNNING'")[0]!.n,1);
+    const jobId=w.inspect('owner',"SELECT job_id FROM jobs WHERE state='RUNNING'")[0]!.job_id;
+    const cancel=w.owner.ai.cancel.bind(w.owner.ai);let committedAtCancel=false;
+    w.owner.ai.cancel=async id=>{
+      assert.equal(id,jobId);
+      // A separate connection must see the committed expiry before entering the adapter.
+      const persisted=w.inspect('owner','SELECT state,error_code FROM jobs ORDER BY sequence').at(-1)!;
+      committedAtCancel=persisted.state==='EXPIRED'&&persisted.error_code==='EXPIRED';
+      await cancel(id);
+    };
+    w.advance(1001);await w.owner.core.tick();
+    const expired=w.inspect('owner','SELECT state,error_code FROM jobs ORDER BY sequence').at(-1)!;
+    assert.equal(expired.state,'EXPIRED');assert.equal(expired.error_code,'EXPIRED');
+    assert.equal(committedAtCancel,true);
+    assert.ok(w.owner.ai.calls.some(call=>call.method==='cancel'&&(call.input as {jobId:string}).jobId===jobId));
+    release?.();await w.owner.core.settled();await w.pump();
+    assert.equal(w.inspect('owner','SELECT count(*) n FROM reviews')[0]!.n,0);
+  }finally{release?.();await w.close();}
+});
+
 test('owner computation begun before suspend cannot publish a late result after trusted resume',async()=>{
   const w=await makeWorld();let release:(()=>void)|undefined;
   try{

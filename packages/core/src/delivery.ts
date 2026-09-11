@@ -1,4 +1,4 @@
-import { KuroError, canonicalDigest, decodeWire, digestBytes, encodeWire } from '@kuro/contracts';
+import { CORE_LIMITS, KuroError, canonicalDigest, decodeWire, digestBytes, encodeWire } from '@kuro/contracts';
 import type { AppInput, ApprovedResponse, EvidenceView, Passage, ResponseAck, SearchRequest, WireMessage } from '@kuro/contracts';
 import type { CoreContext } from './context.js';
 import type { ApprovalRow, InboxRow, OutboxRow, RequestRow, SpanRow } from './rows.js';
@@ -20,8 +20,8 @@ export class Delivery {
     });
   }
   private assertIdentityQuota(member:string):void{
-    const n=this.c.store.get<{n:number}>("SELECT count(*) n FROM requests WHERE member_id=? AND state IN ('OUTGOING','RECEIVED','QUEUED','RETRIEVING','REVIEW')",member)?.n??0;
-    if(n>=1)throw new KuroError('CAPACITY_EXCEEDED');
+    const n=this.c.store.get<{n:number}>("SELECT count(*) n FROM requests r WHERE r.member_id=? AND (r.state IN ('OUTGOING','RECEIVED','QUEUED','RETRIEVING','REVIEW') OR (r.state='APPROVED' AND EXISTS (SELECT 1 FROM outbox o WHERE o.response_id=r.response_id AND o.state IN ('OUTBOX_READY','DISPATCHING','RETRY_WAIT'))))",member)?.n??0;
+    if(n>=CORE_LIMITS.maxPendingPerIdentity)throw new KuroError('CAPACITY_EXCEEDED');
   }
   admit(peer:string,message:SearchRequest):Uint8Array{
     const {store:s,authority:a,clock,ids}=this.c;
