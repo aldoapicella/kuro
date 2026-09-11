@@ -39,9 +39,9 @@ export class ProtectedSecretStore implements SecretStore {
     const destination = this.path(name);
     const temporary = join(this.directory, `${randomBytes(16).toString('hex')}.pending`);
     const handle = await open(temporary, 'wx', 0o600);
-    try { await handle.writeFile(this.protector.encrypt(Buffer.from(candidate).toString('hex'))); await handle.sync(); }
-    finally { await handle.close(); }
     try {
+      try { await handle.writeFile(this.protector.encrypt(Buffer.from(candidate).toString('hex'))); await handle.sync(); }
+      finally { await handle.close(); }
       try { await link(temporary, destination); } catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
       const winner = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
       try { await winner.sync(); } finally { await winner.close(); }

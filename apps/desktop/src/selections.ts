@@ -2,6 +2,19 @@ import { randomBytes } from 'node:crypto';
 import { KuroError, VerifiedBindingSchema } from '@kuro/contracts';
 import type { VerifiedBinding, VerifiedPairingPort } from '@kuro/contracts';
 
+/** Every field below is part of the out-of-band verification ceremony. */
+export function formatBindingVerification(value: VerifiedBinding): string {
+  const binding = VerifiedBindingSchema.parse(value);
+  const key = binding.kind === 'authority' ? binding.authorityKey : binding.peerKey;
+  return [
+    `Type: ${binding.kind}`,
+    `Space: ${binding.spaceId}`,
+    ...(binding.kind === 'member' ? [`Member: ${binding.memberId}`] : []),
+    `Key: ${key}`,
+    `Space alias: ${binding.spaceAlias}`,
+  ].join('\n');
+}
+
 /** Register only after the native host has shown a key and obtained local verification. */
 export class VerifiedPairings implements VerifiedPairingPort {
   private readonly tokens = new Map<string, { binding: VerifiedBinding; expires: number }>();

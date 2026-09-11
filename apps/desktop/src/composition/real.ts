@@ -29,15 +29,20 @@ export async function createRealDesktop(directory: string, profile: 'A' | 'B', s
   const memberBytes = await secretStore.createIfAbsent('kuro.local.member.v1', new Uint8Array(randomBytes(16)));
   if (memberBytes.length !== 16) throw new KuroError('IDENTITY_UNAVAILABLE');
   const transport = new HyperDhtTransport({ secretStore, ...configuration });
-  const identity = await transport.start();
-  // Loading this module is explicit; a failed SDK/worker never switches to FakeAiPort.
-  const { createAiAdapter, QvacClient } = await import('@kuro/ai');
-  const ai = createAiAdapter(new QvacClient({ embeddingFallbackSrc: null, generationFallbackSrc: null }));
-  const files = new SelectedTextFiles(), pairing = new VerifiedPairings();
+  let closeAi: (() => Promise<void>) | undefined;
   try {
+    const identity = await transport.start();
+    // Loading this module is explicit; a failed SDK/worker never switches to FakeAiPort.
+    const { createAiAdapter, QvacClient } = await import('@kuro/ai');
+    const ai = createAiAdapter(new QvacClient({ embeddingFallbackSrc: null, generationFallbackSrc: null }));
+    closeAi = () => ai.close();
+    const files = new SelectedTextFiles(), pairing = new VerifiedPairings();
     const memberId = Buffer.from(memberBytes).toString('hex');
     const core = await openCore({ databasePath: join(directory, 'kuro.sqlite'), ai: ai.port, transport, clock: systemClock, ids: secureIds, sessions: { current: () => ({ memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }) }, selectedFiles: files, pairing, clockInitiallyTrusted: false });
     const info: DesktopInfo = { mode: 'real', profile, memberId, publicKey: identity.publicKey, peers: [], scenario: null, clockProtection: 'closed' };
     return { core, app: core.app, files, pairing, info, transport, ai };
-  } catch (error) { await transport.stop(); await ai.close(); throw error; }
+  } catch (error) {
+    await Promise.allSettled([transport.stop(), closeAi?.() ?? Promise.resolve()]);
+    throw error;
+  }
 }

@@ -12,6 +12,7 @@ import { routeCall } from './ipc-router.js';
 import type { WindowBinding } from './ipc-router.js';
 import { ProtectedSecretStore } from './secret-store.js';
 import { DesktopLifecycle } from './lifecycle.js';
+import { formatBindingVerification } from './selections.js';
 import type { VerifiedPairings } from './selections.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,7 @@ let suspend = (): void => {};
 let resume = async (): Promise<void> => {};
 let quitting = false;
 let timer: ReturnType<typeof setInterval> | undefined;
+const suspendSafely = (): void => { try { suspend(); } catch {} };
 
 interface NodeBinding {
   app: AppPort; info: DesktopInfo; files?: SelectedTextFiles; pairing?: VerifiedPairings;
@@ -52,8 +54,7 @@ async function selectBinding(window: BrowserWindow): Promise<VerifiedBinding | n
     if (read.bytesRead !== bytes.length || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new KuroError('STALE_REVISION');
     binding = VerifiedBindingSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
   } finally { await handle.close(); }
-  const key = binding.kind === 'authority' ? binding.authorityKey : binding.peerKey;
-  const answer = await dialog.showMessageBox(window, { type: 'question', title: 'Verify this device', message: 'Compare this full key with the other person using a separate trusted channel.', detail: `Key: ${key}\nSpace: ${binding.spaceId}\n${binding.kind === 'member' ? `Member: ${binding.memberId}\n` : ''}The file alone does not verify a person.`, buttons: ['Cancel', 'I verified the key'], defaultId: 0, cancelId: 0, noLink: true });
+  const answer = await dialog.showMessageBox(window, { type: 'question', title: 'Verify this device', message: 'Compare every detail with the other person using a separate trusted channel.', detail: `${formatBindingVerification(binding)}\n\nThe file alone does not verify a person or space.`, buttons: ['Cancel', 'I verified all details'], defaultId: 0, cancelId: 0, noLink: true });
   return answer.response === 1 ? binding : null;
 }
 
@@ -85,7 +86,8 @@ async function createWindow(node: NodeBinding): Promise<BrowserWindow> {
     }),
     setScenario: async input => { if (!node.fake) return failure('ACCESS_DENIED'); node.fake.reset(input.scenario); return success(null); },
   };
-  bindings.set(window.webContents.id, { senderId: window.webContents.id, url: rendererURL, app: node.app, host });
+  const senderId = window.webContents.id;
+  bindings.set(senderId, { senderId, url: rendererURL, app: node.app, host });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => { event.preventDefault(); });
   window.webContents.on('will-attach-webview', event => { event.preventDefault(); });
@@ -97,7 +99,7 @@ async function createWindow(node: NodeBinding): Promise<BrowserWindow> {
     const checked = CommittedEventSchema.safeParse(event);
     if (checked.success && !window.webContents.isDestroyed()) window.webContents.send('kuro:committed', checked.data);
   });
-  window.on('closed', () => { unsubscribe(); bindings.delete(window.webContents.id); });
+  window.on('closed', () => { unsubscribe(); bindings.delete(senderId); });
   await window.loadURL(rendererURL);
   window.show();
   return window;
@@ -120,11 +122,33 @@ else {
   app.on('second-instance', () => { BrowserWindow.getAllWindows()[0]?.focus(); });
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
-    await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
-    if (argument('probe') === 'host') {
+    const probe = argument('probe');
+    if (probe === 'host') {
       const { runHostProbe } = await import('./probe.js');
       console.log(JSON.stringify(runHostProbe())); app.quit(); return;
     }
+    if (probe === 'runtime' || probe === 'inference' || probe === 'transport') {
+      const { runRuntimeProbe, runtimeProbeErrorCode } = await import('./runtime-probe.js');
+      try {
+        const protector = {
+          protection: () => !safeStorage.isEncryptionAvailable() ? 'unavailable' as const : process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text' ? 'basic_text' as const : 'os-protected' as const,
+          encrypt: (text: string) => safeStorage.encryptString(text), decrypt: (bytes: Uint8Array) => safeStorage.decryptString(Buffer.from(bytes)),
+        };
+        let result;
+        if (probe === 'transport') {
+          const configurationPath = argument('config');
+          if (!configurationPath) throw new KuroError('INVALID_INPUT');
+          const { readRealConfiguration } = await import('./composition/real.js');
+          const configuration = readRealConfiguration(JSON.parse(await readFile(resolve(configurationPath), 'utf8')));
+          result = await runRuntimeProbe({ mode: 'transport', protector, configuration });
+        } else result = await runRuntimeProbe({ mode: probe, protector });
+        console.log(JSON.stringify(result)); app.quit(); return;
+      } catch (error) {
+        console.error(JSON.stringify({ probe, status: 'failed', code: runtimeProbeErrorCode(error), authorizationGate: 'closed' }));
+        app.exit(1); return;
+      }
+    }
+    await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
     if (mode === 'demo') {
       const fake = new FakeAppPort(profile as 'A' | 'B');
       stop = async () => { fake.close(); };
@@ -134,7 +158,7 @@ else {
       const runtime = await createSimulatedDesktop(dataDirectory);
       const lifecycle = new DesktopLifecycle([...runtime.nodes.values()].map(node => node.core));
       stop = runtime.close; suspend = () => lifecycle.suspend(); resume = () => lifecycle.resume();
-      timer = setInterval(() => { void runtime.pump().catch(() => { suspend(); }); }, 500);
+      timer = setInterval(() => { void runtime.pump().catch(suspendSafely); }, 500);
       for (const id of [profile, profile === 'A' ? 'B' : 'A'] as const) await createWindow(runtime.nodes.get(id as 'A' | 'B')!);
     } else {
       const configurationPath = argument('config');
@@ -167,11 +191,13 @@ else {
         await writeFile(temporary, JSON.stringify(updated), { flag: 'wx', mode: 0o600 }); await rename(temporary, peersPath);
         records.push(binding); add(binding);
       } });
-      timer = setInterval(() => { void lifecycle.tick().catch(() => { suspend(); }); }, 500);
+      timer = setInterval(() => { void lifecycle.tick().catch(suspendSafely); }, 500);
     }
-    powerMonitor.on('suspend', () => { suspend(); });
-    powerMonitor.on('lock-screen', () => { suspend(); });
-    powerMonitor.on('resume', () => { void resume(); });
+    powerMonitor.on('suspend', suspendSafely);
+    powerMonitor.on('lock-screen', suspendSafely);
+    const resumeConservatively = (): void => { void resume().catch(suspendSafely); };
+    powerMonitor.on('resume', resumeConservatively);
+    powerMonitor.on('unlock-screen', resumeConservatively);
   }).catch(async error => {
     await stop().catch(() => {});
     dialog.showErrorBox('KURO could not start', `Startup stopped (${error instanceof KuroError ? error.code : 'RUNTIME_UNAVAILABLE'}). Check the desktop README for this mode and its runtime requirements.`);
@@ -183,6 +209,6 @@ app.on('before-quit', event => {
   if (quitting) return;
   event.preventDefault(); quitting = true;
   if (timer) clearInterval(timer);
-  suspend();
+  suspendSafely();
   void stop().then(() => app.quit(), () => app.exit(1));
 });

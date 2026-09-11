@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { openCore, SelectedTextFiles, secureIds, systemClock } from '@kuro/core';
 import { FakeAiPort, FakeSession } from '@kuro/core/testing';
@@ -19,6 +19,9 @@ export function value<T>(result: Result<T>): T { if (!result.ok) throw new KuroE
 /** Real core/SQLite at both ends; deterministic AI and transport are explicitly simulated. */
 export async function createSimulatedDesktop(directory: string) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  // This directory is created by our host, not a renderer-selected document.
+  // Canonicalize its macOS temporary-directory aliases without weakening import checks.
+  directory = await realpath(directory);
   const network = new MemoryNetwork();
   const nodes = new Map<'A' | 'B', SimulatedNode>();
   let pumping: Promise<void> | null = null;
