@@ -22,7 +22,7 @@ interface NativeClockBinding {
  * clock.node placed beside its own host chunk by buildNativeClock. */
 export function loadNativeClock(addonPath?: string): () => ClockSample {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new KuroError('CLOCK_UNCERTAIN');
-  const path = addonPath ?? resolve(dirname(fileURLToPath(import.meta.url)), 'clock.node');
+  const path = addonPath ? resolve(addonPath) : resolve(dirname(fileURLToPath(import.meta.url)), 'clock.node');
   let binding: NativeClockBinding;
   try {
     binding = createRequire(import.meta.url)(path) as NativeClockBinding;
