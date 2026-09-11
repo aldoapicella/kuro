@@ -1,0 +1,119 @@
+name: Desktop preview release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-character commit SHA reachable from main
+        required: true
+        type: string
+      version:
+        description: Desktop preview version (for example 0.1.0-preview.1)
+        required: true
+        type: string
+
+concurrency:
+  group: desktop-preview-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+  RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  qualify:
+    if: github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner
+    runs-on: [self-hosted, kuro-qualified-macos-arm64]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+      - name: Validate exact main source and existing CI
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          node scripts/release-source.mjs
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      - name: Validate requested release metadata
+        run: node scripts/release-validate.mjs metadata --workspace . --version "$RELEASE_VERSION"
+      - name: Build and package the qualified preview
+        run: node scripts/check-source-packaging.mjs pnpm desktop:package
+      - name: Run trusted release qualification
+        run: node scripts/qualify-release.mjs --version "$RELEASE_VERSION" --source-sha "$RELEASE_SOURCE_SHA" --report build/release-validation.json
+      - name: Validate exact release bytes
+        run: node scripts/release-validate.mjs artifacts --workspace . --version "$RELEASE_VERSION" --source-sha "$RELEASE_SOURCE_SHA" --artifact-directory build/packages --qualification-report build/release-validation.json
+      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: qualified-preview-${{ inputs.version }}
+          if-no-files-found: error
+          path: |
+            build/packages/KURO-${{ inputs.version }}-darwin-arm64-unsigned-preview.tar.gz
+            build/packages/KURO-${{ inputs.version }}-darwin-arm64-unsigned-preview.tar.gz.sha256
+            build/release-validation.json
+            build/release-evidence
+      - name: Preserve failed qualification evidence
+        if: failure()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: failed-preview-qualification-${{ inputs.version }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            build/release-validation.json
+            build/release-evidence
+
+  publish:
+    needs: qualify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: qualified-preview-${{ inputs.version }}
+          path: release
+      - name: Verify downloaded qualified artifact layout
+        run: |
+          test -f "release/packages/KURO-$RELEASE_VERSION-darwin-arm64-unsigned-preview.tar.gz"
+          test -f "release/packages/KURO-$RELEASE_VERSION-darwin-arm64-unsigned-preview.tar.gz.sha256"
+          test -f release/release-validation.json
+          test -d release/release-evidence
+      - name: Reject duplicate publication
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          existing_tag="$(git ls-remote --tags origin "refs/tags/v$RELEASE_VERSION")"
+          test -z "$existing_tag"
+          node scripts/release-publication-check.mjs
+      - name: Revalidate tested archive bytes
+        run: node scripts/release-validate.mjs artifacts --workspace . --version "$RELEASE_VERSION" --source-sha "$RELEASE_SOURCE_SHA" --artifact-directory release/packages --qualification-report release/release-validation.json
+      - name: Extract reviewed release notes
+        run: node scripts/release-validate.mjs notes --workspace . --version "$RELEASE_VERSION" > release-notes.md
+      - name: Claim the exact release tag
+        run: git push origin "$RELEASE_SOURCE_SHA:refs/tags/v$RELEASE_VERSION"
+      - name: Publish unsigned preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v$RELEASE_VERSION" "release/packages/KURO-$RELEASE_VERSION-darwin-arm64-unsigned-preview.tar.gz" "release/packages/KURO-$RELEASE_VERSION-darwin-arm64-unsigned-preview.tar.gz.sha256" release/release-validation.json --target "$RELEASE_SOURCE_SHA" --title "KURO $RELEASE_VERSION unsigned preview" --notes-file release-notes.md --prerelease --verify-tag

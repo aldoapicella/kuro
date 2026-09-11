@@ -384,8 +384,23 @@ test('two real GUI processes complete explicit custody and QVAC summary with res
     await expect(requester.page.getByRole('blockquote')).toHaveCount(0);
     await requester.runtime.evaluate(({ powerMonitor }) => { powerMonitor.emit('unlock-screen'); });
     await refreshSpace(requester.page); await evidence(requester.page, permitted);
+    await navigate(owner.page, 'Permissions');
+    const member = owner.page.locator('div.source').filter({ has: owner.page.getByText(`${enrollment.peerKey} · linked`, { exact: true }) });
+    await member.getByRole('button', { name: 'Revoke linked device', exact: true }).click();
+    await expect(owner.page.getByText(`${enrollment.peerKey} · revoked`, { exact: true })).toBeVisible();
+    await navigate(requester.page, 'Spaces');
+    await requester.page.getByRole('button', { name: 'Refresh shared space', exact: true }).click();
+    await expect(requester.page.getByText(/^DENIED · remaining/)).toBeVisible({ timeout: 60_000 });
+    await navigate(requester.page, 'Evidence');
+    const deniedEvidence = requester.page.getByRole('button', { name: /^Open evidence / });
+    if (await deniedEvidence.count()) {
+      await deniedEvidence.click();
+      await expect(requester.page.getByRole('status', { includeHidden: true })).toContainText('ACCESS_DENIED');
+    }
+    await expect(requester.page.getByRole('blockquote')).toHaveCount(0);
+    await requester.page.screenshot({ path: testInfo.outputPath('revoked-device-denied.png') });
     await sample(); expect(sampleError).toBeUndefined(); expect(peakRssBytes).toBeGreaterThan(0);
-    const metrics = { approval: 'automated GUI test, not human semantic review', inference: 'actual QVAC', transport: 'actual Bare/HyperDHT', topology: 'two processes on loopback, shared macOS kernel', packaged, cleanEnvironment: { isolatedUserData: true, isolatedHome: process.env.KURO_GUI_CLEAN_HOME === '1', systemOnlyPath: true, protectedStorage: 'logged-in OS keychain' }, failures: ['lost ACK', 'identical retry', 'one inbox effect', 'receiver restart', 'model-free receipt and reading', 'explicit summary without models fails', 'native lock/unlock event and fresh authority sync'], questionToReviewMs: reviewAt - questionAt, reviewToReceiptMs: receiptAt - reviewAt, explicitSummaryMs: summaryAt - summaryStart, totalMs: summaryAt - started, peakRssBytes, resourceMethod: '500ms samples of summed RSS for both app process trees; includes shared-page double counting; same Mac' };
+    const metrics = { approval: 'automated GUI test, not human semantic review', inference: 'actual QVAC', transport: 'actual Bare/HyperDHT', topology: 'two processes on loopback, shared macOS kernel', packaged, cleanEnvironment: { isolatedUserData: true, isolatedHome: process.env.KURO_GUI_CLEAN_HOME === '1', systemOnlyPath: true, protectedStorage: 'logged-in OS keychain' }, candidateReplacement: Boolean(process.env.KURO_GUI_REPLACEMENT_EXECUTABLE), priorSupportedRelease: null, failures: ['lost ACK', 'identical retry', 'one inbox effect', 'receiver restart', 'model-free receipt and reading', 'explicit summary without models fails', 'native lock/unlock event and fresh authority sync', 'owner GUI device revocation denies subsequent evidence read'], questionToReviewMs: reviewAt - questionAt, reviewToReceiptMs: receiptAt - reviewAt, explicitSummaryMs: summaryAt - summaryStart, totalMs: performance.now() - started, peakRssBytes, resourceMethod: '500ms samples of summed RSS for both app process trees; includes shared-page double counting; same Mac' };
     console.log(JSON.stringify(metrics)); await writeFile(testInfo.outputPath('metrics.json'), JSON.stringify(metrics, null, 2));
   } finally { clearInterval(sampler); for (const runtime of runtimes.reverse()) await runtime.close().catch(() => {}); await rm(directory, { recursive: true, force: true }); }
 });
