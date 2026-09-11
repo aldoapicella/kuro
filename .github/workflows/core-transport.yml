@@ -27,6 +27,8 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: pnpm --filter @kuro/ai-harness harness
+      - run: pnpm --filter @kuro/ai probe:runtime
       - run: pnpm probe:host
       - run: pnpm test:reference
       - run: pnpm --filter @kuro/transport-harness smoke
+      - run: pnpm --filter @kuro/transport-harness core-smoke

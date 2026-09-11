@@ -127,3 +127,34 @@ KURO_AUTHORITY="$KEY_A" KURO_RECIPIENT="$KEY_B" node --import tsx --input-type=m
 B must report A's authenticated key and the same exact body bytes. Enter `{"type":"stop"}` and relaunch a peer with its same seed, then repeat with a new request ID. Replay the already delivered response command and compare its bytes. These helper bytes are synthetic D25 transport fixtures; core must still validate bindings, outstanding request state, counters, leases, and durable installation. Exchange synthetic test seeds only through the controlled diagnostic setup and clear them afterward; they are never production identities.
 
 This is real Node/HyperDHT loopback evidence. It is not a Pear/Bare packaging check and does not demonstrate a physical offline LAN. The remaining runtime check is to package `packages/transport/src/hyperdht-worker.ts` with the selected Bare/Pear host, run the same two-peer exchange against a reachable isolated bootstrap and persistent router, then repeat with the intended LAN disconnected from public Internet.
+
+## Combined core workflow with selectable AI
+
+The same coordinator can run the complete custody/restart scenario in two local OS
+processes, using real HyperDHT and separate SQLite databases:
+
+```sh
+pnpm --filter @kuro/transport-harness core-smoke
+KURO_VM_TEST_CONFIG='{"mode":"local","ai":"qvac"}' pnpm --filter @kuro/transport-harness core-smoke
+```
+
+The default explicitly uses simulated AI. `ai: "qvac"` selects the real adapter from
+`@kuro/ai` in each peer process, without a fallback to simulation. Install the native
+prerequisites and prepare the models using the [AI harness](../ai/README.md) first.
+The coordinator checks each peer's declared provider on startup and restart. It
+compares ranking candidate IDs with permitted review references, performs explicit
+synthetic approval commands, drops ACKs, relaunches the requester, checks byte-identical
+retry and one inbox effect, unloads AI while reading evidence, then explicitly starts
+summary generation. It finally checks revoke-before-dispatch and authority denial.
+
+The output labels automated synthetic approval and the selected model provider; it
+is not a human usability test. Local mode is process-isolation evidence, not an
+offline-LAN or physical-device claim. State directories and generated run IDs are
+printed and retained outside Git for inspection.
+
+Existing SSH/VM configurations retain their behavior. Add `"ai":"qvac"` to the
+previous `KURO_VM_TEST_CONFIG` to use real models on both configured hosts. Preload
+models independently on each host before restricting external egress. The network
+peer's `tick` command returns while model computation proceeds, allowing subsequent
+ticks to enforce the core's computation deadline. The coordinator waits for observable
+index and summary states instead of assuming inference completes within one tick.

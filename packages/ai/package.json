@@ -8,7 +8,8 @@
     "./testing": "./src/testing/index.ts"
   },
   "scripts": {
-    "test": "vitest run test && node --import tsx --test test/core-integration.ts"
+    "test": "vitest run test && node --import tsx --test test/core-integration.ts",
+    "probe:runtime": "node test/runtime-smoke.mjs"
   },
   "dependencies": {
     "@kuro/contracts": "workspace:*",
