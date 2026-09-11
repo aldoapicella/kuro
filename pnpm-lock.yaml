@@ -29,6 +29,9 @@ importers:
 
   harnesses/core:
     dependencies:
+      '@kuro/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@kuro/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
