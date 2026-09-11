@@ -1,7 +1,8 @@
 # AI development harness
 
-The harness imports public workspace exports and runs embedding, ranking, exact
-summary preparation and generation over synthetic evidence.
+The harness imports public workspace exports and runs the whole local retrieval loop
+over synthetic or supplied evidence: embed every passage, embed the question, rank by
+cosine similarity, prepare the exact summary context, then generate grounded claims.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -11,11 +12,34 @@ pnpm --filter @kuro/ai-harness harness --with-qvac
 pnpm --filter @kuro/ai-harness harness --with-qvac --embeddings-only
 ```
 
-The default uses the real adapter with a **scripted QVAC backend**, does not download
-weights and is included in Linux/macOS CI. `--with-qvac` uses the actual QVAC runtime
-and attempts both embedding and generation. `--embeddings-only` limits that run to
-embedding and ranking. Each run reports provider mode, runtime, complete profiles and
-outcome, then closes the runtime. Failed inference exits nonzero; no fake fallback runs.
+Ask your own question over your own text:
+
+```sh
+pnpm --filter @kuro/ai-harness harness --with-qvac \
+  --question "What blocks the release?" --source notes.txt --source status.txt
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--with-qvac` | Load and execute the pinned QVAC models. Without it the backend is scripted. |
+| `--question <text>` | The question to answer. Defaults to a synthetic release question. |
+| `--source <file>` | Add one UTF-8 text file as a passage. Repeatable; 32 KiB each. |
+| `--text <string>` | Add an inline passage. Repeatable. |
+| `--limit <n>` | Passages to pass to generation after ranking (default 3, max 6). |
+| `--embeddings-only` | Stop after embedding and ranking; never loads the generation model. |
+| `--json` | One JSON record per step instead of the readable report. |
+
+With no `--source` or `--text`, a five-passage synthetic corpus of mixed relevance is
+used so ranking has to do real work. The default uses the real adapter with a
+**scripted QVAC backend**, does not download weights and is included in Linux/macOS CI;
+its printed answer is fixed text and is evidence of nothing about inference. Each run
+reports provider mode, runtime, complete profiles and outcome, then closes the runtime.
+Failed inference exits nonzero; no fake fallback runs.
+
+The AI contract caps one embedding call at four blocks, so the harness batches like the
+core does. If the SDK worker fails to start within its default 30 s on a cold host
+(first launch, on-access virus scanning), raise it with
+`QVAC_RPC_INIT_TIMEOUT_MS=180000`; warm starts take a few seconds.
 
 On macOS arm64, the pinned QVAC native addon links Homebrew OpenSSL 3 at
 `/opt/homebrew/opt/openssl@3`; install it with `brew install openssl@3` before real
