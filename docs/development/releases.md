@@ -50,7 +50,15 @@ It defines two 4-CPU, 12-GiB, 80-GiB macOS guests and a small Linux control gues
 with no host mounts. Creating the dedicated `ko` user-v2 network and starting
 the guests are separate Lima operator actions. Do not attach an additional
 network. Complete normal graphical login and native Keychain prompts directly
-inside each macOS guest before running qualification.
+inside each macOS guest before running qualification. The SSH user must be the
+same non-root account shown by `/dev/console`; the coordinator fails closed if
+the console account or UID differs. It starts native probes and the persistent
+GUI driver through a temporary owner-only askpass helper, `sudo -A -k`,
+`launchctl asuser`, and a nested `sudo -n -H -u` back to that SSH user with a
+system-only `PATH`. The helper is removed and checked after its target command
+exits, including the persistent driver's lifetime. It does not send a password
+through the driver's NDJSON input or put one in arguments,
+environment variables, or evidence.
 
 The private `offlineConfiguration` JSON contains `limaHome` and two objects,
 `owner` and `requester`, with these fields:
@@ -61,9 +69,17 @@ The private `offlineConfiguration` JSON contains `limaHome` and two objects,
 | `guestValidationRoot`, `guestRunRoot` | Absolute private guest directories. The run directory must be strictly inside the validation directory; the coordinator checks real paths and symlink containment before destructive cleanup and replaces it for each run. Do not put anything to preserve there. |
 | `driverDirectory`, `driverEvidenceDirectory`, `publicRecordDirectory`, `documentDirectory`, `pcapPath` | Separate paths inside `guestRunRoot` for fresh app profiles, screenshots, GUI-exported public records, synthetic inputs, and the capture. |
 | `guestNodePath`, `guestNodeModulesPath` | Verified Node 24.19.0 and the repository's pinned Playwright dependencies, staged privately inside `guestValidationRoot` and outside `guestRunRoot`. These drive the test; KURO runs with only system directories on `PATH`. |
-| `sudoCredentialPath` | The guest's disposable login credential file, owned by its guest user and mode `0400` or `0600`. The reviewed helper feeds it directly to guest `sudo` through stdin. No credential value belongs in JSON, arguments, environment variables, logs, or Git. |
+| `sudoCredentialPath` | The guest's disposable login credential file, owned by its guest user and mode `0400` or `0600`. The GUI-session path uses a temporary owner-only askpass helper, while the separate non-streaming PF/capture helpers use direct `sudo` stdin. Product-driver stdin remains NDJSON. No credential value belongs in JSON, arguments, environment variables, logs, or Git. |
 | `peerIp`, `routerIp`, `managementIp`, `lanInterface` | Observed addresses and non-loopback interface. The current topology uses owner `.3`, requester `.4`, Linux control `.1`, and Lima management `.2` within `192.168.241.0/24`, on `en0`. |
 | `modelCache.embedding`, `modelCache.summary` | Each has a guest-private absolute `path`, expected `bytes`, and pinned `sha256`. The paths stay inside `guestValidationRoot`, outside the run directory. Use the model identifiers and hashes from the desktop's model asset definitions. |
+
+The coordinator copies archives, test infrastructure, GUI public records,
+screenshots, and packet captures with `/usr/bin/scp`'s default SFTP mode. Each
+transfer has one guest endpoint and uses that peer's `sshConfig`/`sshHost` plus
+`BatchMode=yes`, `ControlMaster=no`, and `ControlPath=none`, matching remote
+commands. Local and guest paths must be absolute, and every guest path remains
+inside `guestRunRoot`. Do not use `limactl copy`: it can select a separate NAT
+management route that the guest egress gate correctly blocks.
 
 Store the host JSON with mode `0600`. Stage the verified model weights and
 test-controller runtime before applying the egress gate. The coordinator copies
@@ -89,8 +105,9 @@ itself against its final archive; an externally supplied passing report is not
 accepted. Success requires distinct live guest boot IDs, qualified native
 probes, fresh GUI setup, exact reviewed delivery, lost-ACK retries, reconnect,
 model-free evidence reads, actual QVAC summary and literal citations, and GUI
-revocation. Both guests must fail external TCP controls before and after the
-workflow. Bounded Ethernet/IPv4/UDP header captures must show traffic between
+revocation. Both guests must pass a bounded local `127.0.0.1` TCP control and
+fail external TCP controls before and after the workflow. Bounded
+Ethernet/IPv4/UDP header captures must show traffic between
 their actual LAN addresses. The report records relative capture paths and
 verified cleanup; a failed cleanup keeps the gate failed.
 

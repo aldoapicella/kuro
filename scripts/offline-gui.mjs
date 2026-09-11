@@ -6,7 +6,7 @@
  * local Playwright driver through its NDJSON public-GUI contract.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, realpathSync } from 'node:fs';
 import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve } from 'node:path';
 import { spawn, execFile as execFileCallback } from 'node:child_process';
@@ -36,35 +36,35 @@ const result = {
   artifactSha256: await sha256(archive), freshPeerStartup: false, reconnected: false,
   externalBlockedBefore: false, externalBlockedAfter: false,
   topology: 'two-qualified-macos-guests-on-isolated-virtual-lan',
-  native: {}, management: {}, packets: {}, workflow: [], testInfra: { driverSha256, pfSha256, captureSha256 }, cleanup: { verified: false }, error: null,
+  native: {}, management: {}, packets: {}, workflow: [], phases: [], testInfra: { driverSha256, pfSha256, captureSha256 }, cleanup: { verified: false }, error: null,
 };
 const save = async () => writeFile(join(evidence, 'result.json'), `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
 
 async function main() { try {
-  validate(configuration);
-  const archiveManifest = await manifestInArchive(archive);
+  await runPhase('configuration', () => validate(configuration));
+  const archiveManifest = await runPhase('archive-manifest', () => manifestInArchive(archive));
   if (archiveManifest.sourceCommit !== args['source-sha']) throw new Error('Archive sourceCommit does not match --source-sha');
   if (archiveManifest.version !== args.version) throw new Error('Archive version does not match --version');
   const peers = new Map();
   for (const name of ['owner', 'requester']) {
     const peer = configuration[name];
-    await provisionGuestArtifact(peer);
-    await prepareGuest(peer);
-    await provisionModels(peer);
-    result.native[name] = await qualify(peer);
+    await runPhase(`${name}.provision`, () => provisionGuestArtifact(peer));
+    await runPhase(`${name}.prepare`, () => prepareGuest(peer));
+    await runPhase(`${name}.models`, () => provisionModels(peer));
+    result.native[name] = await runPhase(`${name}.qualification`, () => qualify(peer));
     peers.set(name, new Driver(name, peer));
   }
   if (result.native.owner.bootSessionId === result.native.requester.bootSessionId) throw new Error('Owner and requester did not expose distinct live virtual-guest boot sessions');
-  await Promise.all(['owner', 'requester'].map(installGate));
-  await Promise.all(['owner', 'requester'].map(verifyAndCommitGate));
-  await runEgressControls('before');
-  await startCaptures();
-  for (const driver of peers.values()) await driver.start();
+  await runPhase('pf.install', () => Promise.all(['owner', 'requester'].map(installGate)));
+  await runPhase('pf.verify-and-commit', () => Promise.all(['owner', 'requester'].map(verifyAndCommitGate)));
+  await runPhase('egress.before', () => runEgressControls('before'));
+  await runPhase('captures.start', () => startCaptures());
+  for (const [name, driver] of peers) await runPhase(`${name}.driver-start`, () => driver.start());
 
-  await runScenario(peers);
-  await runEgressControls('after');
-  await stopCaptures();
-  await collectPacketEvidence();
+  await runPhase('gui-scenario', () => runScenario(peers));
+  await runPhase('egress.after', () => runEgressControls('after'));
+  await runPhase('captures.stop', () => stopCaptures());
+  await runPhase('packets.collect', () => collectPacketEvidence());
   if (!result.freshPeerStartup || !result.reconnected) throw new Error('Workflow did not prove fresh startup and reconnect');
   result.status = 'passed';
 } catch (error) {
@@ -85,7 +85,33 @@ async function main() { try {
   }
   await save();
 }
+
 if (result.status !== 'passed') process.exitCode = 1;
+}
+
+async function runPhase(name, operation) {
+  try {
+    const value = await operation();
+    result.phases.push({ name, status: 'passed' });
+    return value;
+  } catch (error) {
+    const classification = classifyFailure(error);
+    result.phases.push({ name, status: 'failed', classification });
+    await mkdir(join(evidence, 'phases'), { recursive: true, mode: 0o700 });
+    await writeFile(join(evidence, 'phases', `${name.replaceAll(/[^a-z0-9.-]/gi, '_')}.txt`), `${classification}\n`, { mode: 0o600 });
+    throw new Error(`${name} failed`);
+  }
+}
+function classifyFailure(error) {
+  const message = [
+    error instanceof Error ? error.message : '',
+    typeof error?.stderr === 'string' ? error.stderr : '',
+  ].join('\n');
+  if (error?.code === 'ETIMEDOUT') return 'timeout';
+  if (error?.code === 'ENOENT') return 'tool-unavailable';
+  if (/User interaction is not allowed|IDENTITY_UNAVAILABLE/i.test(message)) return 'gui-session-unavailable';
+  if (/not qualified|did not pass|does not match|did not expose/i.test(message)) return 'qualification-rejected';
+  return 'command-failed';
 }
 
 function validate(config) {
@@ -94,6 +120,7 @@ function validate(config) {
   for (const name of ['owner', 'requester']) {
     const peer = config[name];
     for (const key of ['instance', 'sshConfig', 'sshHost', 'sudoCredentialPath', 'pcapPath', 'guestValidationRoot', 'guestRunRoot', 'guestNodePath', 'guestNodeModulesPath', 'driverDirectory', 'driverEvidenceDirectory', 'publicRecordDirectory', 'documentDirectory', 'peerIp', 'routerIp', 'managementIp', 'lanInterface']) if (typeof peer?.[key] !== 'string' || !peer[key]) throw new Error(`${name}.${key} is required`);
+    if (!isSshAlias(peer.sshHost)) throw new Error(`${name}.sshHost must be a simple SSH alias`);
     if (peer.lanInterface === 'lo0') throw new Error(`${name}.lanInterface cannot be loopback`);
     for (const path of ['sshConfig', 'sudoCredentialPath', 'guestValidationRoot', 'guestRunRoot', 'guestNodePath', 'guestNodeModulesPath', 'driverDirectory', 'driverEvidenceDirectory', 'publicRecordDirectory', 'documentDirectory', 'pcapPath']) if (!isAbsolute(peer[path])) throw new Error(`${name}.${path} must be absolute`);
     for (const path of ['guestRunRoot', 'guestNodePath', 'guestNodeModulesPath', 'driverDirectory', 'driverEvidenceDirectory', 'publicRecordDirectory', 'documentDirectory', 'pcapPath']) if (!inside(peer.guestValidationRoot, peer[path])) throw new Error(`${name}.${path} must remain under guestValidationRoot`);
@@ -111,25 +138,35 @@ async function qualify(peer) {
   const executable = shellQuote(join(guestAppPath(peer), 'Contents/MacOS/kuro'));
   const lifecycleData = shellQuote(join(peer.guestRunRoot, 'native-lifecycle'));
   const runtimeData = shellQuote(join(peer.guestRunRoot, 'native-runtime'));
-  const command = `sw_vers; uname -srm; ${executable} --probe=lifecycle --user-data-dir=${lifecycleData}; ${executable} --probe=runtime --user-data-dir=${runtimeData}; printf '\n---BOOT---\n'; sysctl -n kern.bootsessionuuid`;
-  const { stdout } = await execFile('ssh', [...sshArgs(peer), command], { maxBuffer: 1024 * 1024, timeout: 180_000 });
-  if (!/ProductVersion:\s*26\.5/.test(stdout) || !/BuildVersion:\s*25F71/.test(stdout) || !/Darwin 25\.5\.0 arm64/.test(stdout)) throw new Error(`${peer.instance} is not qualified`);
-  const probes = stdout.split('\n').map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(value => value?.status === 'passed');
-  const lifecycle = probes.find(value => value.probe === 'lifecycle');
-  const runtime = probes.find(value => value.probe === 'runtime');
+  const platform = await remote(peer, 'sw_vers; uname -srm');
+  if (!/ProductVersion:\s*26\.5/.test(platform) || !/BuildVersion:\s*25F71/.test(platform) || !/Darwin 25\.5\.0 arm64/.test(platform)) throw new Error(`${peer.instance} is not qualified`);
+  const lifecycleOutput = await runPhase(`${peer.instance}.native-lifecycle`, () => guiSession(peer, `${executable} --probe=lifecycle --user-data-dir=${lifecycleData}`, 180_000));
+  await saveProbeEvidence(peer, 'lifecycle', lifecycleOutput);
+  const runtimeOutput = await runPhase(`${peer.instance}.native-runtime`, () => guiSession(peer, `${executable} --probe=runtime --user-data-dir=${runtimeData}`, 180_000));
+  await saveProbeEvidence(peer, 'runtime', runtimeOutput);
+  const lifecycle = probeResult(lifecycleOutput, 'lifecycle');
+  const runtime = probeResult(runtimeOutput, 'runtime');
   if (!lifecycle?.nativeClock || !runtime || runtime.storage?.protection !== 'os-protected') throw new Error(`${peer.instance} did not pass actual lifecycle/native-clock and runtime/os-keychain probes`);
-  const bootSessionId = stdout.split('\n---BOOT---\n')[1]?.trim().split('\n')[0];
+  const bootSessionId = (await remote(peer, 'sysctl -n kern.bootsessionuuid')).trim();
   if (!bootSessionId) throw new Error(`${peer.instance} did not expose a live boot session identifier`);
   return { lifecycle, runtime, bootSessionId };
+}
+function probeResult(output, probe) {
+  return output.split('\n').map(line => { try { return JSON.parse(line); } catch { return null; } }).find(value => value?.status === 'passed' && value.probe === probe);
+}
+async function saveProbeEvidence(peer, probe, output) {
+  const directory = join(evidence, 'probes');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, `${peer.instance}-${probe}.jsonl`), output, { mode: 0o600 });
 }
 async function provisionGuestArtifact(peer) {
   const root = shellQuote(peer.guestRunRoot), archivePath = guestArchivePath(peer), driverPath = guestDriverPath(peer), appManifest = shellQuote(join(guestAppPath(peer), 'Contents/Resources/app/package.json'));
   await assertGuestRunRoot(peer);
   await remote(peer, `rm -rf ${root} && test -x ${shellQuote(peer.guestNodePath)} && test -d ${shellQuote(peer.guestNodeModulesPath)} && mkdir -p ${root} ${shellQuote(dirname(driverPath))} && ln -s ${shellQuote(peer.guestNodeModulesPath)} ${shellQuote(join(dirname(driverPath), 'node_modules'))}`);
-  await limaCopy(configuration.limaHome, archive, `${peer.instance}:${archivePath}`);
-  await limaCopy(configuration.limaHome, driverSource, `${peer.instance}:${driverPath}`);
-  await limaCopy(configuration.limaHome, pfSource, `${peer.instance}:${guestPfPath(peer)}`);
-  await limaCopy(configuration.limaHome, captureSource, `${peer.instance}:${guestCapturePath(peer)}`);
+  await copyToGuest(peer, archive, archivePath);
+  await copyToGuest(peer, driverSource, driverPath);
+  await copyToGuest(peer, pfSource, guestPfPath(peer));
+  await copyToGuest(peer, captureSource, guestCapturePath(peer));
   const manifest = 'KURO-darwin-arm64/KURO.app/Contents/Resources/app/package.json', quotedArchive = shellQuote(archivePath);
   const command = `shasum -a 256 ${quotedArchive}; printf '\\n---ARCHIVE---\\n'; tar -xOzf ${quotedArchive} ${shellQuote(manifest)}; tar -xzf ${quotedArchive} -C ${root}; codesign --verify --deep --strict ${shellQuote(guestAppPath(peer))}; printf '\\n---APP---\\n'; cat ${appManifest}; printf '\\n---DRIVER---\\n'; shasum -a 256 ${shellQuote(driverPath)} ${shellQuote(guestPfPath(peer))} ${shellQuote(guestCapturePath(peer))}`;
   const { stdout } = await execFile('ssh', [...sshArgs(peer), command], { maxBuffer: 1024 * 1024, timeout: 180_000 });
@@ -141,6 +178,13 @@ async function provisionGuestArtifact(peer) {
 }
 async function runEgressControls(phase) {
   for (const [name, peer] of Object.entries({ owner: configuration.owner, requester: configuration.requester })) {
+    const loopbackOutput = join(evidence, `${name}-loopback-${phase}.log`);
+    try {
+      await writeFile(loopbackOutput, await assertGuestLoopbackTcp(peer), { mode: 0o600 });
+    } catch (error) {
+      await writeFile(loopbackOutput, 'Guest loopback TCP control failed.\n', { mode: 0o600 });
+      throw new Error(`${name} loopback TCP control failed ${phase} workflow`);
+    }
     const command = `${shellQuote(guestPfPath(peer))} assert`;
     const output = join(evidence, `${name}-egress-${phase}.log`);
     try {
@@ -152,6 +196,35 @@ async function runEgressControls(phase) {
   }
   if (phase === 'before') result.externalBlockedBefore = true;
   else result.externalBlockedAfter = true;
+}
+async function assertGuestLoopbackTcp(peer) {
+  const script = `const net = require('node:net');
+const sockets = new Set();
+let client, finished = false;
+const server = net.createServer(socket => {
+  sockets.add(socket);
+  socket.once('close', () => sockets.delete(socket));
+  socket.end();
+});
+const finish = (code, message) => {
+  if (finished) return;
+  finished = true;
+  clearTimeout(deadline);
+  if (client) client.destroy();
+  for (const socket of sockets) socket.destroy();
+  if (server.listening) server.close(() => {});
+  process.stdout.write(message + String.fromCharCode(10), () => process.exit(code));
+};
+const deadline = setTimeout(() => finish(1, 'loopback TCP timed out'), 3000);
+server.once('error', () => finish(1, 'loopback TCP listener failed'));
+server.listen({ host: '127.0.0.1', port: 0 }, () => {
+  const address = server.address();
+  if (!address || typeof address === 'string') return finish(1, 'loopback TCP listener address failed');
+  client = net.createConnection({ host: '127.0.0.1', port: address.port });
+  client.once('connect', () => finish(0, 'loopback TCP passed'));
+  client.once('error', () => finish(1, 'loopback TCP connection failed'));
+});`;
+  return remote(peer, `${shellQuote(peer.guestNodePath)} -e ${shellQuote(script)}`);
 }
 async function installGate(name) {
   const peer = configuration[name], other = name === 'owner' ? configuration.requester.peerIp : configuration.owner.peerIp;
@@ -236,7 +309,7 @@ async function runScenario(peers) {
       if (typeof response.path !== 'string' || !response.path.startsWith('/')) throw new Error(`${action} did not return an exported public path`);
       const destination = join(evidence, 'records', `${save}.json`);
       await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-      await limaCopy(configuration.limaHome, `${driver.peer.instance}:${response.path}`, destination);
+      await copyFromGuest(driver.peer, response.path, destination);
       records[save] = { hostPath: destination, sourcePeer: driver.peer, sourcePath: response.path };
     }
     if (check) check(response);
@@ -296,18 +369,18 @@ async function prepareDocuments() {
   const paths = {};
   for (const [key, [name, contents]] of Object.entries(documents)) {
     const hostPath = join(local, name); await mkdir(dirname(hostPath), { recursive: true, mode: 0o700 }); await writeFile(hostPath, contents, { mode: 0o600 });
-    const guestPath = join(owner.documentDirectory, name); await remote(owner, `mkdir -p ${shellQuote(dirname(guestPath))}`); await limaCopy(configuration.limaHome, hostPath, `${owner.instance}:${guestPath}`); paths[key] = guestPath;
+    const guestPath = join(owner.documentDirectory, name); await remote(owner, `mkdir -p ${shellQuote(dirname(guestPath))}`); await copyToGuest(owner, hostPath, guestPath); paths[key] = guestPath;
   }
   return { ...paths, allowedText: documents.allowed[1].trim() };
 }
 async function collectScreenshot(peerName, action, response) {
   if (typeof response?.screenshot !== 'string' || !response.screenshot.startsWith('/')) return;
   const peer = configuration[peerName], destination = join(evidence, 'screenshots', `${String(result.workflow.length + 1).padStart(2, '0')}-${peerName}-${action}.png`);
-  await mkdir(dirname(destination), { recursive: true, mode: 0o700 }); await limaCopy(configuration.limaHome, `${peer.instance}:${response.screenshot}`, destination);
+  await mkdir(dirname(destination), { recursive: true, mode: 0o700 }); await copyFromGuest(peer, response.screenshot, destination);
 }
 async function collectPacketEvidence() {
   for (const [name, peer] of Object.entries({ owner: configuration.owner, requester: configuration.requester })) {
-    const destination = join(evidence, 'packets', `${name}.pcap`); await mkdir(dirname(destination), { recursive: true, mode: 0o700 }); await limaCopy(configuration.limaHome, `${peer.instance}:${peer.pcapPath}`, destination);
+    const destination = join(evidence, 'packets', `${name}.pcap`); await mkdir(dirname(destination), { recursive: true, mode: 0o700 }); await copyFromGuest(peer, peer.pcapPath, destination);
     if ((await stat(destination)).size <= 24) throw new Error(`${name} packet capture contains no packet records`);
     const other = name === 'owner' ? configuration.requester.peerIp : configuration.owner.peerIp;
     const route = await remote(peer, `route -n get ${shellQuote(other)}; printf '\n---INTERFACE---\n'; tcpdump -nn -r ${shellQuote(peer.pcapPath)}`);
@@ -320,14 +393,38 @@ async function collectPacketEvidence() {
 async function remote(peer, command) {
   const { stdout, stderr } = await execFile('ssh', [...sshArgs(peer), command], { maxBuffer: 4 * 1024 * 1024, timeout: 120_000 }); return `${stdout}${stderr}`;
 }
-function sshArgs(peer) { return ['-F', peer.sshConfig, '-o', 'BatchMode=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none', peer.sshHost]; }
+async function guiSession(peer, command, timeout = 120_000) {
+  const { stdout, stderr } = await execFile('ssh', [...sshArgs(peer), guiSessionCommand(peer, command)], { maxBuffer: 4 * 1024 * 1024, timeout });
+  return `${stdout}${stderr}`;
+}
+function guiSessionCommand(peer, command) {
+  const helperDirectory = shellQuote(dirname(guestDriverPath(peer)));
+  const credential = shellQuote(peer.sudoCredentialPath);
+  const content = `#!/bin/sh\nset -eu\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\nexport PATH\ncredential=${credential}\ntest -f "$credential"\ntest ! -L "$credential"\nowner=$(stat -f %Su "$credential")\nmode=$(stat -f %Lp "$credential")\nsize=$(stat -f %z "$credential")\ntest "$owner" = "$(id -un)"\n{ test "$mode" = 400 || test "$mode" = 600; }\ntest "$size" -gt 0\ntest "$size" -le 128\nexec /bin/cat "$credential"\n`;
+  const wrapper = `set -eu; PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; ssh_user=$(id -un); ssh_uid=$(id -u); test "$ssh_uid" -ne 0; console_user=$(stat -f %Su /dev/console); test "$console_user" = "$ssh_user"; console_uid=$(id -u "$console_user"); test "$console_uid" = "$ssh_uid"; helper_directory=${helperDirectory}; test -d "$helper_directory"; test ! -L "$helper_directory"; test "$(stat -f %Su "$helper_directory")" = "$ssh_user"; directory_mode=$(stat -f %Lp "$helper_directory"); case "$directory_mode" in *[!0-7]*|'') exit 1;; esac; test $((0$directory_mode & 022)) -eq 0; helper=$(umask 077; mktemp "$helper_directory/sudo-askpass.XXXXXX"); trap 'rm -f "$helper"' 0 HUP INT TERM; printf %s ${shellQuote(content)} > "$helper"; chmod 700 "$helper"; test -f "$helper"; test ! -L "$helper"; test "$(stat -f %Su "$helper")" = "$ssh_user"; test "$(stat -f %Lp "$helper")" = 700; SUDO_ASKPASS="$helper" /usr/bin/sudo -A -k /bin/launchctl asuser "$console_uid" /usr/bin/sudo -n -H -u "$ssh_user" /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin ${command}; rm -f "$helper"; test ! -e "$helper"; test ! -L "$helper"; trap - 0 HUP INT TERM`;
+  return `/bin/sh -c ${shellQuote(wrapper)}`;
+}
+function sshConnectionOptions(peer) { return ['-F', peer.sshConfig, '-o', 'BatchMode=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none']; }
+function sshArgs(peer) { return [...sshConnectionOptions(peer), peer.sshHost]; }
 async function privileged(peer, command) {
   const credential = shellQuote(peer.sudoCredentialPath);
   const validate = `owner=$(stat -f %Su ${credential}) mode=$(stat -f %Lp ${credential}); test "$owner" = "$(id -un)" && { test "$mode" = 400 || test "$mode" = 600; }`;
   return remote(peer, `if sudo -n true; then sudo -n sh -c ${shellQuote(command)}; else ${validate} && sudo -S -p '' sh -c ${shellQuote(command)} < ${credential}; fi`);
 }
-async function limaCopy(limaHome, source, destination) {
-  await execFile('limactl', ['copy', '--backend=scp', source, destination], { env: { ...process.env, ...(limaHome ? { LIMA_HOME: limaHome } : {}) }, timeout: 120_000 });
+async function copyToGuest(peer, hostPath, guestPath) {
+  await execFile('/usr/bin/scp', scpTransferArgs(peer, 'to', hostPath, guestPath), { timeout: 120_000 });
+}
+async function copyFromGuest(peer, guestPath, hostPath) {
+  await execFile('/usr/bin/scp', scpTransferArgs(peer, 'from', hostPath, guestPath), { timeout: 120_000 });
+}
+function scpTransferArgs(peer, direction, hostPath, guestPath) {
+  if (!isSshAlias(peer.sshHost)) throw new Error('Guest transfer requires a simple SSH alias');
+  if (!isAbsolute(hostPath) || !isAbsolute(guestPath)) throw new Error('Guest transfer paths must be absolute');
+  if (!inside(peer.guestRunRoot, guestPath)) throw new Error('Guest transfer path must remain under guestRunRoot');
+  const endpoint = `${peer.sshHost}:${guestPath}`;
+  if (direction === 'to') return [...sshConnectionOptions(peer), hostPath, endpoint];
+  if (direction === 'from') return [...sshConnectionOptions(peer), endpoint, hostPath];
+  throw new Error('Guest transfer direction is invalid');
 }
 async function substitute(value, records, destinationPeer, values) {
   if (typeof value === 'string' && value.startsWith('$record.')) {
@@ -335,7 +432,7 @@ async function substitute(value, records, destinationPeer, values) {
     if (!record) throw new Error(`Missing exported record ${value}`);
     if (record.sourcePeer === destinationPeer) return record.sourcePath;
     const guestPath = join(destinationPeer.publicRecordDirectory, basename(record.hostPath));
-    await limaCopy(configuration.limaHome, record.hostPath, `${destinationPeer.instance}:${guestPath}`);
+    await copyToGuest(destinationPeer, record.hostPath, guestPath);
     return guestPath;
   }
   if (typeof value === 'string' && value.startsWith('$value.')) {
@@ -357,7 +454,7 @@ function* drivers() { yield* liveDrivers; }
 class Driver {
   constructor(name, peer) { this.name = name; this.peer = peer; this.pending = new Map(); this.child = null; this.fatal = null; this.stopping = false; }
   async start() {
-    this.child = spawn('ssh', [...sshArgs(this.peer), guestDriverCommand(this.peer, this.name)], { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn('ssh', [...sshArgs(this.peer), guiSessionCommand(this.peer, guestDriverCommand(this.peer, this.name))], { stdio: ['pipe', 'pipe', 'pipe'] });
     liveDrivers.add(this);
     const fail = error => this.fail(error);
     this.child.on('error', fail);
@@ -431,7 +528,12 @@ async function assertDriverStopped(peer, name) {
   const command = `for pattern in ${shellQuote(driverPattern)} ${shellQuote(appPattern)}; do for pid in $(pgrep -f "$pattern" || true); do [ "$pid" = "$$" ] || exit 1; done; done`;
   await remote(peer, command);
 }
-await main();
+function isDirectEntry() {
+  try { return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+}
+if (isDirectEntry()) await main();
+export { guiSessionCommand, qualify, scpTransferArgs };
 async function sha256(path) { const hash = createHash('sha256'); for await (const chunk of createReadStream(path)) hash.update(chunk); return hash.digest('hex'); }
 async function manifestInArchive(path) {
   const manifest = 'KURO-darwin-arm64/KURO.app/Contents/Resources/app/package.json';
@@ -440,13 +542,14 @@ async function manifestInArchive(path) {
 }
 async function assertGuestRunRoot(peer) {
   const root = shellQuote(peer.guestRunRoot), base = shellQuote(peer.guestValidationRoot), parent = shellQuote(dirname(peer.guestRunRoot));
-  await remote(peer, `test ! -L ${root}; base_real=$(cd ${base} && pwd -P); parent_real=$(cd ${parent} && pwd -P); case "$parent_real/" in "$base_real/"*) ;; *) exit 1;; esac`);
+  await remote(peer, `set -eu; test ! -L ${root}; base_real=$(cd ${base} && pwd -P); parent_real=$(cd ${parent} && pwd -P); case "$parent_real/" in "$base_real/"*) ;; *) exit 1;; esac`);
 }
 async function assertGuestDestructiveTargets(peer, targets) {
   await assertGuestRunRoot(peer);
   const root = shellQuote(peer.guestRunRoot), quotedTargets = targets.map(shellQuote).join(' ');
-  await remote(peer, `run_real=$(cd ${root} && pwd -P); set -- ${quotedTargets}; for target; do test ! -L "$target"; parent_real=$(cd "$(dirname "$target")" && pwd -P); case "$parent_real/" in "$run_real/"*) ;; *) exit 1;; esac; done`);
+  await remote(peer, `set -eu; run_real=$(cd ${root} && pwd -P); set -- ${quotedTargets}; for target; do test ! -L "$target"; parent_real=$(cd "$(dirname "$target")" && pwd -P); case "$parent_real/" in "$run_real/"*) ;; *) exit 1;; esac; done`);
 }
+function isSshAlias(value) { return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value); }
 function inside(root, candidate) {
   if (!isAbsolute(root) || !isAbsolute(candidate)) return false;
   const safeRoot = posix.normalize(root), safeCandidate = posix.normalize(candidate);

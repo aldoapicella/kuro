@@ -25,7 +25,8 @@ install() {
   cat >"$anchor_file" <<EOF
 table <kuro_offline_peers> persist { $peers }
 $(if [ -n "$management" ]; then printf 'table <kuro_offline_management> persist { %s }\n' "$management"; fi)
-pass out quick on lo0 all
+# Playwright's local Electron inspector requires TCP over both loopback directions.
+pass quick on lo0 all
 pass out quick inet proto udp from any to <kuro_offline_peers>
 $(if [ -n "$management" ]; then printf 'pass out quick inet proto tcp from any port 22 to <kuro_offline_management> port 1024:65535 flags any keep state\n'; fi)
 block drop out quick all
