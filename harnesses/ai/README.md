@@ -25,6 +25,10 @@ alone does not reliably install that optional transitive dependency in a clean c
 The runtime probe starts the actual SDK worker and checks its heartbeat without loading
 models; Linux/macOS CI runs it after a frozen install.
 
+On minimal Ubuntu 24.04 arm64, install `libatomic1` before starting the SDK worker
+(`sudo apt-get install libatomic1`). Its RocksDB native dependency needs
+`libatomic.so.1`; a package install alone does not provide system shared libraries.
+
 Real mode downloads models on first use: approximately 670 MB for GTE and 1.1 GB for
 Qwen. QVAC caches weights outside the repository under its configured cache directory
 (default `~/.qvac`). The registry download can fall back to the exact pinned HTTP

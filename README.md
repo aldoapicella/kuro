@@ -6,7 +6,7 @@ KURO lets participants query information held by trusted peers while each custod
 
 ## Project status
 
-The custody core, public TypeScript contracts, persistent SQLite workflow and authenticated HyperDHT transport are implemented. The core harness uses explicitly simulated AI/transport and manual human approval. A separate two-process harness exercises actual HyperDHT authentication and framing. The QVAC adapter implements the existing public AI contract; its independent harness separates scripted tests from real model execution. Electron composition and physical offline-LAN operation remain separate integration gates.
+The custody core, public TypeScript contracts, persistent SQLite workflow and authenticated HyperDHT transport are implemented. The manual core harness uses explicitly simulated AI/transport. The combined two-process coordinator supports actual QVAC, SQLite and HyperDHT, with explicit automated test approval; its output identifies the selected AI provider. The QVAC adapter implements the existing public AI contract, and its independent harness separates scripted tests from real model execution. Electron composition and physical offline-LAN operation remain separate integration gates.
 
 ## Design principles
 

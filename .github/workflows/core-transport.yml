@@ -22,6 +22,9 @@ jobs:
         with:
           node-version: 24.19.0
           cache: pnpm
+      - name: Install Linux native runtime prerequisite
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libatomic1
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build

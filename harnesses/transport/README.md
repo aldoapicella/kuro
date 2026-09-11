@@ -20,7 +20,7 @@ KURO_VM_TEST_CONFIG='{"bootstrapHost":"192.168.104.1","sshConfig":"/home/test/.s
 
 Replace addresses, users and paths with the actual VM values. `bootstrapHost` must be the owner VM's address, reachable directly from the requester. The SSH configuration identifies the requester. The runner preserves each peer's SQLite directory and uses fresh synthetic transport seeds for each run; the requester relaunch within that run reuses its seed and database. These in-memory test secret stores do not validate production OS secret storage.
 
-The automated fixture prints the exact synthetic review and explicitly calls approval with its stored revision/digest. It rejects both a wrong revision and a wrong digest before approving the unchanged view. It checks restricted/cross-space exclusion, durable evidence, dropped ACK, same-identity process relaunch, identical response retries with one inbox effect, model-free reading, no summary calls on receipt, explicit simulated preparation/execution, revoke-before-dispatch and a correlated DENIED authority projection. It does not replace the [manual human-review harness](../core/README.md). All AI is explicitly `FakeAiPort`; HyperDHT authentication, framing, network traffic and SQLite are real.
+The automated fixture prints the exact synthetic review and explicitly calls approval with its stored revision/digest. It rejects both a wrong revision and a wrong digest before approving the unchanged view. It checks restricted/cross-space exclusion, durable evidence, dropped ACK, same-identity process relaunch, identical response retries with one inbox effect, model-free reading, no summary calls on receipt, explicit preparation/execution, revoke-before-dispatch and a correlated DENIED authority projection. It does not replace the [manual human-review harness](../core/README.md). AI defaults to explicitly simulated `FakeAiPort`; selecting `ai: "qvac"` uses actual local QVAC. HyperDHT authentication, framing, network traffic and SQLite are real in both modes.
 
 For a fully isolated VM run, install dependencies before applying firewall rules. Use a dedicated nftables `inet` output chain with a default-drop policy on **each test VM**, allowing loopback, UDP to the two test VM addresses, owner-to-requester SSH port 22, and SSH replies to the management host. The management source may differ from the VM LAN gateway; inspect `$SSH_CONNECTION` first. Cover IPv4 and IPv6. Do not replace unrelated host firewall rules. Check the rules with `nft -c -f`, apply them, prove that an external TCP connection fails, then launch fresh peers. Remove only the dedicated test table afterward. The runner does not change any firewall itself.
 
@@ -74,7 +74,7 @@ Run as the normal user inside `kuro-owner`. `setpriv` drops root after entering 
 ```sh
 KURO_TEST_UID=$(id -u)
 KURO_TEST_GID=$(id -g)
-sudo ip netns exec kuro-owner setpriv --reuid="$KURO_TEST_UID" --regid="$KURO_TEST_GID" --init-groups \
+sudo ip netns exec kuro-owner setpriv --reuid="$KURO_TEST_UID" --regid="$KURO_TEST_GID" --init-groups --reset-env \
   env PATH="$PATH" KURO_VM_TEST_CONFIG='{"bootstrapHost":"10.77.0.1","sshConfig":"/absolute/test/requester-ssh.config","sshHost":"kuro-requester-netns","guestRepository":"/absolute/kuro","guestStateRoot":"/absolute/test/requester-state","hostStateRoot":"/absolute/test/owner-state","guestPort":49747}' \
   node --import tsx harnesses/transport/src/virtual-core.ts
 ```
@@ -158,3 +158,12 @@ models independently on each host before restricting external egress. The networ
 peer's `tick` command returns while model computation proceeds, allowing subsequent
 ticks to enforce the core's computation deadline. The coordinator waits for observable
 index and summary states instead of assuming inference completes within one tick.
+
+The actual-QVAC profile passed at `290c7cb` on macOS arm64 in local mode (run
+`2b843fd6-bbc3-4fc1-bb87-5c6949d243fa`) and on Ubuntu 24.04.4 arm64 using the one-VM
+namespace procedure (run `87ef0191-d073-4596-9a51-1e3e06060131`). The virtual run used
+8 GiB RAM, a 20 GiB disk, Node 24.19.0, pnpm 11.19.0 and `libatomic1`. Models were
+cached with the pinned checksums before the output-default-drop gates were applied.
+Both external TCP controls failed before and after the complete workflow, including
+actual QVAC summary generation. These are synthetic automated workflow results;
+physical-device behavior and desktop composition remain unverified.

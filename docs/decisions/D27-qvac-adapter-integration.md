@@ -55,11 +55,39 @@ Fresh local validation on September 10, 2026 passed:
 
 The real run required the workspace's targeted `require-asset` hoist and Homebrew
 OpenSSL 3 (3.6.4 in this run), which the pinned macOS native addon links directly.
+Subsequent clean-checkout verification found that the hoist alone could still omit
+the optional transitive loader. `@kuro/ai` now explicitly pins `require-asset` 1.2.2,
+retaining the narrow hoist. A new detached checkout with a frozen pnpm install loaded
+the actual GTE model successfully. CI now checks an actual SDK worker heartbeat with
+no model load, so scripted tests cannot hide this packaging failure.
 Model weights remained in the external QVAC cache. The original author's Windows
 embedding-only result is separate historical evidence. Hosted checks are recorded
 on the PR for its final head.
 Electron application composition, physical LAN operation and retrieval/summary quality
 remain separate gates; this adapter alone does not close them.
+
+The selectable-AI transport coordinator also passed the complete workflow on macOS
+arm64 with actual QVAC and two Node processes/databases (run
+`2b843fd6-bbc3-4fc1-bb87-5c6949d243fa`, implementation `290c7cb`). It indexed synthetic
+documents, excluded restricted/cross-space candidates, rejected stale approval tokens,
+delivered explicitly approved bytes, dropped an ACK, restarted the requester and
+verified immutable retry with one inbox effect. Evidence remained readable after the
+requester runtime was closed; a new runtime then generated a private draft with a
+literal quote. Revocation blocked a pending dispatch and installed DENIED authority
+state. This run used real HyperDHT over loopback and automated approval commands;
+it establishes neither physical LAN operation nor human review usability.
+
+The same `290c7cb` scenario passed with actual QVAC on Ubuntu 24.04.4 arm64 / Node
+24.19.0 in one Lima VM with two isolated Linux network namespaces (run
+`87ef0191-d073-4596-9a51-1e3e06060131`, exit 0). The owner and requester used separate
+SQLite state, a direct `10.77.0.1`/`10.77.0.2` veth link, strict SSH for the requester
+process, no default routes and output-default-drop nftables gates. External TCP
+controls failed in both namespaces before and after the complete run. Public GTE/Qwen
+weights were cached and SHA-256 verified before isolation; no inference fallback was
+used. The VM was resized to 8 GiB RAM and a 20 GiB disk, retaining its state. The
+minimal guest also required `libatomic1` for the SDK worker's RocksDB native dependency.
+This closes the virtual offline-network integration check using one shared kernel;
+it is not a two-VM, physical-device or desktop-packaging result.
 
 ## Provenance
 
