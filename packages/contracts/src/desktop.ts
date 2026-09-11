@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { IDSchema, KeySchema } from './wire.js';
 import { VerifiedBindingSchema } from './host.js';
 import { ErrorCodeSchema } from './errors.js';
+import { ModelProfileSchema } from './ai.js';
 import type { Result } from './errors.js';
 
 /** Trusted local OS actions, separate from domain AppPort and never accepted over P2P. */
@@ -44,6 +45,7 @@ export const DesktopSetupSchema = z.strictObject({
   clockProtection: z.enum(['simulated', 'closed', 'native']),
   secretProtection: z.enum(['os-protected', 'ephemeral-test', 'unavailable', 'basic_text']),
   models: z.array(DesktopModelStateSchema).max(2), freeDiskBytes: bytes.nullable(),
+  embeddingProfile: ModelProfileSchema.nullable(),
   error: ErrorCodeSchema.nullable(),
 });
 export type DesktopSetup = z.infer<typeof DesktopSetupSchema>;
