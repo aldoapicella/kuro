@@ -68,6 +68,7 @@ Local results on September 10, 2026:
 | Strict typecheck and declaration/JavaScript build | Passed. |
 | Contract tests | 8 passed. |
 | Core tests | 64 passed, including 26 authority cases, six separate-process SIGKILL cases, two actual manual-CLI tests and seven additional request-cancellation/recovery cases. |
+| Core admission/expiry audit follow-up | 66 core tests and 132 TypeScript tests overall passed at `f2d541c`. New regressions fail against the earlier implementation: an undelivered approval retains its identity quota until delivery ends, and request TTL expiry records/cancels computation after commit. |
 | Transport tests | 22 passed at `84c1de7`, including actual Bare UTF-8/IPC, startup cancellation, nonzero shutdown, concurrent identity creation, overlapping shutdown/restart, simultaneous dials and delayed/lost-message conformance. |
 | Python reference regression | 16 passed, independently of the TypeScript suites. |
 | Real HyperDHT smoke | Passed: five authenticated D25 protocol messages, process relaunch, exact-byte replay. |
@@ -76,6 +77,7 @@ Local results on September 10, 2026:
 | Virtual custody workflow | Passed with the implementation incorporated in `4d59f7e`, using one Ubuntu VM using two isolated Linux network namespaces and a direct veth link. Separate peer processes/databases, output-default-drop gates and failed external TCP controls. |
 | Combined real QVAC custody workflow | Passed at `290c7cb` on macOS arm64 with two Node processes and on Ubuntu arm64 with two isolated network namespaces. Actual QVAC, HyperDHT and SQLite; no scripted inference. See D27 for run IDs and boundaries. |
 | Actual Bare + QVAC custody workflow | Passed at `84c1de7` on macOS arm64 and on Ubuntu arm64 in two isolated network namespaces with external TCP blocked before/after. Node hosts, actual Bare 1.32.0 network workers, actual QVAC and separate SQLite databases; exact runs and clean-shutdown evidence are in D28. |
+| Real QVAC custody after admission/expiry fixes | Passed locally at `f2d541c`: run `44788246-5fce-4ffd-8398-699506092933`, exit zero after acknowledged clean shutdown, with real QVAC/Bare and separate SQLite databases. |
 | Clean QVAC runtime installation | A fresh detached pnpm install loaded GTE on macOS after explicitly pinning `require-asset`; Linux worker heartbeat passed after installing `libatomic1`. CI runs the no-model worker probe. |
 | Two Lima guests over user-v2 | Not passed: clean runs timed out at initial authority synchronization or after requester relaunch. A synchronized direct UDP echo passed; these failures do not establish a generic UDP outage. |
 
