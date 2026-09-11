@@ -39,3 +39,22 @@ test('linked device keys aggregate the pending-request quota by authenticated me
     assert.deepEqual(received,['CLOSED']);assert.equal(w.inspect('owner',"SELECT count(*) n FROM requests WHERE direction='IN'")[0]!.n,1);
   }finally{await alternate?.stop();await w.close();}
 });
+
+test('an undelivered approval still occupies its identity quota until ACK',async()=>{
+  const w=await makeWorld();
+  try{
+    await w.importDoc('Outstanding observations remain pending.');
+    const view=await w.review();
+    ok(await w.owner.core.app.approveDraft({draftId:view.draftId,expectedRevision:view.revision,reviewedViewDigest:view.viewDigest}));
+    const second=encodeWire({v:1,type:'SEARCH_REQUEST',requestId:'f'.repeat(32),spaceAlias:w.alias,audienceKey:w.owner.key,ttlSeconds:3600,query:'Second question'});
+    await w.requester.transport.inner.send(w.owner.key,second);w.network.flush();await w.owner.core.settled();
+    assert.equal(w.inspect('owner','SELECT count(*) n FROM requests')[0]!.n,1);
+    assert.equal(w.inspect('owner','SELECT state FROM outbox')[0]!.state,'OUTBOX_READY');
+    assert.ok(w.owner.transport.sent.some(frame=>{const message=decodeWire(frame.bytes);return message.type==='CLOSED'&&message.requestId==='f'.repeat(32);}));
+    await w.pump();
+    const third=encodeWire({v:1,type:'SEARCH_REQUEST',requestId:'e'.repeat(32),spaceAlias:w.alias,audienceKey:w.owner.key,ttlSeconds:3600,query:'Third question'});
+    await w.requester.transport.inner.send(w.owner.key,third);w.network.flush();await w.owner.core.settled();
+    assert.equal(w.inspect('owner','SELECT count(*) n FROM requests')[0]!.n,2);
+    assert.equal(w.inspect('owner','SELECT state FROM outbox')[0]!.state,'ACKED');
+  }finally{await w.close();}
+});
