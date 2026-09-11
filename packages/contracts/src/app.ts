@@ -20,6 +20,23 @@ export const SpaceViewSchema = z.strictObject({
   syncState: SpaceSyncStateSchema, lastSyncMs: validity, remainingValidityMs: revision,
 });
 export type SpaceView = z.infer<typeof SpaceViewSchema>;
+const DeviceAdministrationSchema = z.strictObject({ publicKey: KeySchema, spaceAlias: IDSchema, revoked: z.boolean() });
+const MemberAdministrationSchema = z.strictObject({ memberId: IDSchema, active: z.boolean(), capabilities, validUntilMs: validity, devices: z.array(DeviceAdministrationSchema).max(4) });
+const RelationshipAdministrationSchema = z.strictObject({ memberId: IDSchema, otherMemberId: IDSchema, allowed: z.boolean(), validUntilMs: validity });
+const ProjectionMemberSchema = z.strictObject({ memberId: IDSchema, capabilities, deviceKeys: z.array(KeySchema).min(1).max(4) });
+/** Fails CLOCK_UNCERTAIN without a trusted lifecycle clock; recipient reads also fail EXPIRED when their projection lease is stale. */
+export const SpaceAdministrationSchema = z.discriminatedUnion('scope', [
+  z.strictObject({ space: SpaceViewSchema, scope: z.literal('owner'), tombstoned: z.boolean(), members: z.array(MemberAdministrationSchema).max(16), relationships: z.array(RelationshipAdministrationSchema).max(120) }),
+  z.strictObject({ space: SpaceViewSchema, scope: z.literal('recipient-projection'), members: z.array(ProjectionMemberSchema).max(16) }),
+]);
+export type SpaceAdministration = z.infer<typeof SpaceAdministrationSchema>;
+export const LocalGrantSchema = z.strictObject({ memberId: IDSchema, admitted: z.boolean(), actions: capabilities, validUntilMs: validity });
+/** Only a current local administrator can read or edit these rows; it fails CLOCK_UNCERTAIN or EXPIRED before exposing them. */
+export const LocalGrantsViewSchema = z.strictObject({ spaceId: IDSchema, policyEpoch: revision, canEdit: z.literal(true), grants: z.array(LocalGrantSchema).max(16) });
+export type LocalGrantsView = z.infer<typeof LocalGrantsViewSchema>;
+/** Only a current local administrator can read document rules; it fails CLOCK_UNCERTAIN or EXPIRED before exposing them. */
+export const DocumentRulesViewSchema = z.strictObject({ spaceId: IDSchema, documentId: IDSchema, revision, rules: z.array(DocumentRuleSchema).max(16) });
+export type DocumentRulesView = z.infer<typeof DocumentRulesViewSchema>;
 export const ReviewViewSchema = z.strictObject({
   draftId: IDSchema, requestId: IDSchema, spaceId: IDSchema, revision,
   recipientKey: KeySchema, question: z.string().max(2048),
@@ -62,6 +79,7 @@ export const AppCommands = {
   enrollMember: z.strictObject({ spaceId: IDSchema, selectionId: IDSchema, capabilities, validUntilMs: validity, expectedRevision: revision }),
   setMember: z.strictObject({ spaceId: IDSchema, memberId: IDSchema, active: z.boolean(), capabilities, validUntilMs: validity, expectedRevision: revision }),
   setRelationship: z.strictObject({ spaceId: IDSchema, memberId: IDSchema, otherMemberId: IDSchema, allowed: z.boolean(), validUntilMs: validity, expectedRevision: revision }),
+  revokeDevice: z.strictObject({ spaceId: IDSchema, publicKey: KeySchema, expectedRevision: revision }),
   pairPeer: z.strictObject({ selectionId: IDSchema }),
   refreshSpace: z.strictObject({ spaceId: IDSchema }),
   setLocalPolicy: z.strictObject({ spaceId: IDSchema, memberId: IDSchema, admitted: z.boolean(), actions: capabilities, validUntilMs: validity, expectedRevision: revision }),
@@ -70,6 +88,9 @@ export const AppCommands = {
   setIndexProfile: z.strictObject({ spaceId: IDSchema, profile: ModelProfileSchema, expectedRevision: revision }),
   submitQuestion: z.strictObject({ spaceId: IDSchema, custodianKey: KeySchema, query: z.string().min(1).refine(q => new TextEncoder().encode(q).length <= 2048), ttlSeconds: z.number().int().min(1).max(86400) }),
   getState: z.strictObject({}),
+  getSpaceAdministration: z.strictObject({ spaceId: IDSchema }),
+  getLocalGrants: z.strictObject({ spaceId: IDSchema }),
+  getDocumentRules: z.strictObject({ spaceId: IDSchema, documentId: IDSchema }),
   listReviews: z.strictObject({ spaceId: IDSchema }),
   getReview: z.strictObject({ draftId: IDSchema }),
   reviseDraft: z.strictObject({ draftId: IDSchema, expectedRevision: revision, reviewedViewDigest: DigestSchema, selectedSpanIds: z.array(IDSchema).min(1).max(6), conditions: ConditionsSchema }),
@@ -83,10 +104,11 @@ export type AppCommandName = keyof typeof AppCommands;
 export type AppInput<K extends AppCommandName> = z.infer<(typeof AppCommands)[K]>;
 export interface AppOutputs {
   createSpace: SpaceView; pairSpace: SpaceView; replaceAuthority: SpaceView; enrollMember: SpaceView; setMember: SpaceView;
-  setRelationship: SpaceView; pairPeer: null; refreshSpace: { requestId: string };
+  setRelationship: SpaceView; revokeDevice: SpaceView; pairPeer: null; refreshSpace: { requestId: string };
   setLocalPolicy: SpaceView; setDocumentRules: { revision: number };
   importText: { documentId: string; versionId: string; jobId: string; revision: number };
   setIndexProfile: { jobId: string }; submitQuestion: { requestId: string };
+  getSpaceAdministration: SpaceAdministration; getLocalGrants: LocalGrantsView; getDocumentRules: DocumentRulesView;
   getState: StateView; listReviews: ReviewView[]; getReview: ReviewView; reviseDraft: ReviewView;
   approveDraft: { responseId: string }; getEvidence: EvidenceView;
   requestLocalSummary: { summaryId: string; jobId: string }; getSummary: SummaryView; cancelJob: null;
@@ -94,11 +116,12 @@ export interface AppOutputs {
 /** Validated host-to-renderer replies. Existing AppPort inputs and semantics are unchanged. */
 export const AppOutputSchemas = {
   createSpace: SpaceViewSchema, pairSpace: SpaceViewSchema, replaceAuthority: SpaceViewSchema,
-  enrollMember: SpaceViewSchema, setMember: SpaceViewSchema, setRelationship: SpaceViewSchema,
+  enrollMember: SpaceViewSchema, setMember: SpaceViewSchema, setRelationship: SpaceViewSchema, revokeDevice: SpaceViewSchema,
   pairPeer: z.null(), refreshSpace: z.strictObject({ requestId: IDSchema }),
   setLocalPolicy: SpaceViewSchema, setDocumentRules: z.strictObject({ revision }),
   importText: z.strictObject({ documentId: IDSchema, versionId: IDSchema, jobId: IDSchema, revision }),
   setIndexProfile: z.strictObject({ jobId: IDSchema }), submitQuestion: z.strictObject({ requestId: IDSchema }),
+  getSpaceAdministration: SpaceAdministrationSchema, getLocalGrants: LocalGrantsViewSchema, getDocumentRules: DocumentRulesViewSchema,
   getState: StateViewSchema, listReviews: z.array(ReviewViewSchema).max(256),
   getReview: ReviewViewSchema, reviseDraft: ReviewViewSchema,
   approveDraft: z.strictObject({ responseId: IDSchema }), getEvidence: EvidenceViewSchema,

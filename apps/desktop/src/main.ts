@@ -13,6 +13,7 @@ import type { WindowBinding } from './ipc-router.js';
 import { ProtectedSecretStore } from './secret-store.js';
 import { DesktopLifecycle } from './lifecycle.js';
 import { formatBindingVerification } from './selections.js';
+import { unavailableSetup } from './setup-unavailable.js';
 import type { VerifiedPairings } from './selections.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,7 @@ async function createWindow(node: NodeBinding): Promise<BrowserWindow> {
     finally { selecting = false; }
   };
   const host: DesktopHostPort = {
+    ...unavailableSetup(node.info),
     getInfo: async () => success(node.fake ? node.fake.info() : structuredClone(node.info)),
     selectText: async () => select(async check => {
       if (node.fake) return { selectionId: demoId(90), displayName: 'synthetic-release-note.txt' };

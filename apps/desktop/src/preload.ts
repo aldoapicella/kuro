@@ -31,5 +31,15 @@ const host: DesktopHostPort = Object.freeze({
   selectText: input => invoke('kuro:host:selectText', input),
   selectPairing: input => invoke('kuro:host:selectPairing', input),
   setScenario: input => invoke('kuro:host:setScenario', input),
+  getSetup: input => invoke('kuro:host:getSetup', input),
+  saveProfile: input => invoke('kuro:host:saveProfile', input),
+  startWorkspace: input => invoke('kuro:host:startWorkspace', input),
+  stopWorkspace: input => invoke('kuro:host:stopWorkspace', input),
+  prepareModel: input => invoke('kuro:host:prepareModel', input),
+  cancelModel: input => invoke('kuro:host:cancelModel', input),
+  exportInvitation: input => invoke('kuro:host:exportInvitation', input),
+  exportEnrollment: input => invoke('kuro:host:exportEnrollment', input),
+  exportIdentity: input => invoke('kuro:host:exportIdentity', input),
+  selectLinkedIdentity: input => invoke('kuro:host:selectLinkedIdentity', input),
 } satisfies DesktopHostPort);
 contextBridge.exposeInMainWorld('kuro', Object.freeze({ app, host }));

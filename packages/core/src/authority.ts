@@ -2,7 +2,7 @@ import {
   CORE_LIMITS, KuroError, LIMITS, decodeWire, digestBytes, encodeWire, projectionDigest,
 } from '@kuro/contracts';
 import type {
-  AppInput, Capability, Clock, IdSource, LocalSession, SessionPort, SpaceMember,
+  AppInput, Capability, Clock, DocumentRulesView, IdSource, LocalGrantsView, LocalSession, SessionPort, SpaceAdministration, SpaceMember,
   SpaceStateRequest, SpaceStateResponse, SpaceView, VerifiedPairingPort,
 } from '@kuro/contracts';
 import { migrateAuthority } from './authority-schema.js';
@@ -314,6 +314,52 @@ export class Authority {
       if (changed) this.store.run(`INSERT INTO authority_relationships VALUES(?,?,?,?,?) ON CONFLICT(space_id,member_a,member_b) DO UPDATE SET allowed=excluded.allowed,valid_until_ms=excluded.valid_until_ms`, input.spaceId, a, b, Number(input.allowed), input.validUntilMs);
       return changed;
     });
+  }
+
+  revokeDevice(input: AppInput<'revokeDevice'>): SpaceView {
+    return this.ownerMutation(input.spaceId, input.expectedRevision, () => {
+      const binding = this.store.get<BindingRow>('SELECT * FROM authority_bindings WHERE space_id=? AND peer_key=?', input.spaceId, input.publicKey);
+      if (!binding) throw new KuroError('INVALID_INPUT');
+      if (binding.denial_only) return false;
+      this.store.run('UPDATE authority_bindings SET denial_only=1 WHERE space_id=? AND peer_key=?', input.spaceId, input.publicKey);
+      return true;
+    });
+  }
+
+  getSpaceAdministration(spaceId: string): SpaceAdministration {
+    this.requireClock();
+    const space = this.space(spaceId);
+    if (space.is_owner) {
+      this.assertOwner(spaceId);
+      const members = this.store.all<MemberRow>('SELECT member_id,active,capabilities,valid_until_ms FROM authority_members WHERE space_id=? ORDER BY member_id', spaceId).map(member => ({
+        memberId: member.member_id, active: Boolean(member.active), capabilities: parseCaps(member.capabilities), validUntilMs: member.valid_until_ms,
+        devices: this.store.all<BindingRow>('SELECT * FROM authority_bindings WHERE space_id=? AND member_id=? ORDER BY peer_key', spaceId, member.member_id).map(device => ({ publicKey: device.peer_key, spaceAlias: device.space_alias, revoked: Boolean(device.denial_only) })),
+      }));
+      const relationships = this.store.all<{ member_a: string; member_b: string; allowed: number; valid_until_ms: number | null }>('SELECT member_a,member_b,allowed,valid_until_ms FROM authority_relationships WHERE space_id=? ORDER BY member_a,member_b', spaceId).map(row => ({ memberId: row.member_a, otherMemberId: row.member_b, allowed: Boolean(row.allowed), validUntilMs: row.valid_until_ms }));
+      return { space: this.view(space), scope: 'owner', tombstoned: Boolean(space.tombstoned), members, relationships };
+    }
+    this.authorizeLocal(spaceId, 'manage');
+    return { space: this.getSpace(spaceId), scope: 'recipient-projection', members: this.store.all<{ member_id: string; capabilities: string }>('SELECT member_id,capabilities FROM cached_members WHERE space_id=? ORDER BY member_id', spaceId).map(member => ({ memberId: member.member_id, capabilities: parseCaps(member.capabilities), deviceKeys: this.store.all<{ peer_key: string }>('SELECT peer_key FROM cached_member_keys WHERE space_id=? AND member_id=? ORDER BY peer_key', spaceId, member.member_id).map(key => key.peer_key) })) };
+  }
+
+  getLocalGrants(spaceId: string): LocalGrantsView {
+    this.assertLocalAdministrator(spaceId);
+    const space = this.space(spaceId);
+    const grants = space.is_owner
+      ? this.store.all<LocalPolicyRow & { member_id: string }>(`SELECT lp.member_id,lp.admitted,lp.actions,lp.valid_until_ms FROM local_policy lp JOIN authority_members am ON am.space_id=lp.space_id AND am.member_id=lp.member_id JOIN authority_bindings ab ON ab.space_id=am.space_id AND ab.member_id=am.member_id AND ab.denial_only=0 WHERE lp.space_id=? AND am.active=1 AND (am.valid_until_ms IS NULL OR am.valid_until_ms>?) GROUP BY lp.member_id ORDER BY lp.member_id`, spaceId, this.validClock().wall)
+      : this.store.all<LocalPolicyRow & { member_id: string }>(`SELECT lp.member_id,lp.admitted,lp.actions,lp.valid_until_ms FROM local_policy lp JOIN cached_members cm ON cm.space_id=lp.space_id AND cm.member_id=lp.member_id JOIN cached_member_keys ck ON ck.space_id=cm.space_id AND ck.member_id=cm.member_id WHERE lp.space_id=? GROUP BY lp.member_id ORDER BY lp.member_id`, spaceId);
+    return { spaceId, policyEpoch: space.policy_epoch, canEdit: true, grants: grants.map(grant => ({ memberId: grant.member_id, admitted: Boolean(grant.admitted), actions: parseCaps(grant.actions), validUntilMs: grant.valid_until_ms })) };
+  }
+
+  getDocumentRules(spaceId: string, documentId: string, revision: number): DocumentRulesView {
+    this.assertLocalAdministrator(spaceId);
+    const space = this.space(spaceId);
+    const rows = space.is_owner
+      ? this.store.all<{ member_id: string; action: Capability; valid_until_ms: number | null }>(`SELECT da.member_id,da.action,da.valid_until_ms FROM document_acl da JOIN authority_members am ON am.space_id=da.space_id AND am.member_id=da.member_id WHERE da.space_id=? AND da.document_id=? AND am.active=1 AND (am.valid_until_ms IS NULL OR am.valid_until_ms>?) AND EXISTS(SELECT 1 FROM authority_bindings ab WHERE ab.space_id=am.space_id AND ab.member_id=am.member_id AND ab.denial_only=0) ORDER BY da.member_id,da.action`, spaceId, documentId, this.validClock().wall)
+      : this.store.all<{ member_id: string; action: Capability; valid_until_ms: number | null }>(`SELECT da.member_id,da.action,da.valid_until_ms FROM document_acl da JOIN cached_members cm ON cm.space_id=da.space_id AND cm.member_id=da.member_id WHERE da.space_id=? AND da.document_id=? AND EXISTS(SELECT 1 FROM cached_member_keys ck WHERE ck.space_id=cm.space_id AND ck.member_id=cm.member_id) ORDER BY da.member_id,da.action`, spaceId, documentId);
+    const grouped = new Map<string, { memberId: string; actions: Capability[]; validUntilMs: number | null }>();
+    for (const row of rows) { const rule = grouped.get(row.member_id) ?? { memberId: row.member_id, actions: [], validUntilMs: row.valid_until_ms }; rule.actions.push(row.action); grouped.set(row.member_id, rule); }
+    return { spaceId, documentId, revision, rules: [...grouped.values()] };
   }
 
   async pairPeer(input: AppInput<'pairPeer'>): Promise<null> {
