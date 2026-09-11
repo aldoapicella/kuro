@@ -20,3 +20,10 @@ export type FromWorker =
   | { type: 'event'; event: import('@kuro/contracts').TransportEvent }
   | { type: 'stopped' }
   | { type: 'fatal'; message: string };
+
+/** Private network engine boundary; never exposed to AppPort or a remote peer. */
+export interface NetworkWorkerPort {
+  onMessage(handler: (message: ToWorker) => void): void;
+  postMessage(message: FromWorker): void;
+  close(): void;
+}
