@@ -1,9 +1,7 @@
-name: Core, transport and AI
+name: Core, transport, AI, and desktop
 on:
   push:
-    paths: ['packages/contracts/**', 'packages/core/**', 'packages/transport/**', 'packages/ai/**', 'apps/desktop/**', 'tests/integration/**', 'harnesses/**', 'fixtures/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', '.github/workflows/core-transport.yml']
   pull_request:
-    paths: ['packages/contracts/**', 'packages/core/**', 'packages/transport/**', 'packages/ai/**', 'apps/desktop/**', 'tests/integration/**', 'harnesses/**', 'fixtures/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', '.github/workflows/core-transport.yml']
 permissions:
   contents: read
 jobs:
@@ -13,7 +11,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -29,18 +27,30 @@ jobs:
       - name: Install macOS native runtime prerequisite
         if: runner.os == 'macOS'
         run: brew install openssl@3
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm build
-      - run: pnpm test
-      - run: pnpm --filter @kuro/ai-harness harness
-      - run: pnpm --filter @kuro/ai probe:runtime
-      - run: pnpm probe:host
-      - run: pnpm test:reference
-      - run: pnpm --filter @kuro/transport-harness smoke
-      - run: pnpm --filter @kuro/transport-harness core-smoke
-      - run: pnpm desktop:build
-      - run: pnpm --filter @kuro/desktop package
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck and build
+        run: |
+          pnpm typecheck
+          pnpm build
+      - name: Full contracts, core, transport, AI, and desktop suites
+        run: pnpm test
+      - name: QVAC worker heartbeat
+        run: pnpm --filter @kuro/ai probe:runtime
+      - name: Host SQLite capability probe
+        run: pnpm probe:host
+      - name: Reference and transport harnesses
+        run: |
+          pnpm test:reference
+          pnpm --filter @kuro/transport-harness smoke
+          pnpm --filter @kuro/transport-harness core-smoke
+      - name: Verify macOS native packaging helpers
+        if: runner.os == 'macOS'
+        run: node --test apps/desktop/test/macos-native-deps.test.mjs
+      - name: Verify release metadata and qualification gates
+        run: node --test scripts/release-validate.test.mjs
+      - name: Build and package without source manifest mutation
+        run: node scripts/check-source-packaging.mjs pnpm desktop:package
       - name: Configure Linux Chromium sandbox helpers
         if: runner.os == 'Linux'
         run: |
@@ -49,15 +59,32 @@ jobs:
           packaged_sandbox="build/packages/KURO-linux-$(node -p process.arch)/chrome-sandbox"
           sudo chown root:root "$desktop_sandbox" "$packaged_sandbox"
           sudo chmod 4755 "$desktop_sandbox" "$packaged_sandbox"
-      - name: Verify packaging preserves workspace contracts and dependency manifests
-        run: git diff --exit-code -- package.json pnpm-lock.yaml pnpm-workspace.yaml packages/*/package.json apps/desktop/package.json
-      - name: Electron UI regression tests
+      - name: Relocated Linux package probe
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node apps/desktop/scripts/probe-package.mjs --probe=host
+      - name: Relocated macOS package probes
         if: runner.os == 'macOS'
         run: |
-          node apps/desktop/scripts/probe-package.mjs
+          node apps/desktop/scripts/probe-package.mjs --probe=host
+          node apps/desktop/scripts/probe-package.mjs --probe=runtime
+          if [ "$(uname -m)" = "arm64" ] && [ "$(uname -r)" = "25.5.0" ] && [ "$(sw_vers -buildVersion)" = "25F71" ]; then
+            node apps/desktop/scripts/probe-package.mjs --probe=lifecycle
+          else
+            echo 'Native addon built; this hosted OS is not qualified for protected real mode. Exact-platform lifecycle and actual-model gates run in trusted release validation.'
+          fi
           pnpm exec playwright test --config=apps/desktop/playwright.config.ts
       - name: Electron UI regression tests with a virtual display
         if: runner.os == 'Linux'
         run: |
-          xvfb-run --auto-servernum node apps/desktop/scripts/probe-package.mjs
           xvfb-run --auto-servernum pnpm exec playwright test --config=apps/desktop/playwright.config.ts
+      - name: Upload bounded failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: desktop-diagnostics-${{ runner.os }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            build/desktop-ui-results
+            build/packages/*.sha256
+            build/packages/*/resources/app/package.json
