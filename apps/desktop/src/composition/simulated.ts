@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { openCore, SelectedTextFiles, secureIds, systemClock } from '@kuro/core';
 import { FakeAiPort, FakeSession } from '@kuro/core/testing';
 import { MemoryNetwork, MemoryTransport } from '@kuro/transport';
-import { KuroError, IDSchema } from '@kuro/contracts';
+import { AiCapabilitiesSchema, KuroError, IDSchema } from '@kuro/contracts';
 import type { AiPort, AppPort, Capability, Clock, DesktopInfo, Result } from '@kuro/contracts';
 import type { CustodyCore } from '@kuro/core';
 import { VerifiedPairings } from '../selections.js';
@@ -38,11 +38,13 @@ export async function createSimulatedDesktop(directory: string, options: Simulat
   const nodes = new Map<'A' | 'B', SimulatedNode>();
   let pumping: Promise<void> | null = null;
   let closing: Promise<void> | null = null;
-  const close = (): Promise<void> => {
+  const close = (closeCores: () => Promise<void> = async () => {
+    const results = await Promise.allSettled([...nodes.values()].map(node => node.core.stop()));
+    if (results.some(r => r.status === 'rejected')) throw new Error('KURO simulated core shutdown failed');
+  }): Promise<void> => {
     closing ??= (async () => {
       await pumping?.catch(() => {});
-      const results = await Promise.allSettled([...nodes.values()].map(node => node.core.stop()));
-      if (results.some(r => r.status === 'rejected')) throw new Error('KURO simulated core shutdown failed');
+      await closeCores();
     })();
     return closing;
   };
@@ -50,7 +52,10 @@ export async function createSimulatedDesktop(directory: string, options: Simulat
     if (closing) return closing;
     pumping ??= (async () => {
       for (let turn = 0; turn < 6; turn++) {
-        for (const node of nodes.values()) await node.core.tick();
+        for (const node of nodes.values()) {
+          await node.core.tick();
+          await node.core.settled();
+        }
         network.flush();
         for (const node of nodes.values()) await node.core.settled();
       }
@@ -63,9 +68,10 @@ export async function createSimulatedDesktop(directory: string, options: Simulat
       const peer = profile === 'A' ? DEMO_OWNER : DEMO_REQUESTER;
       const files = new SelectedTextFiles(), pairing = new VerifiedPairings();
       const ai: AiPort = options.createAi ? options.createAi(profile) : new FakeAiPort();
+      const capabilities = AiCapabilitiesSchema.parse(await ai.getCapabilities());
       const transport = new MemoryTransport({ network, publicKey: identity.publicKey, pairedPeers: [peer.publicKey] });
       const core = await openCore({ databasePath: join(directory, `${profile}.sqlite`), ai, transport, clock, ids: secureIds, sessions: new FakeSession({ memberId: identity.memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }), selectedFiles: files, pairing, clockInitiallyTrusted: true });
-      nodes.set(profile, { app: core.app, core, ai, files, pairing, info: { mode: 'core-simulated', profile, ...identity, peers: [peer], scenario: null, clockProtection: 'simulated', aiProvider: options.createAi ? 'qvac' : 'simulated' } });
+      nodes.set(profile, { app: core.app, core, ai, files, pairing, info: { mode: 'core-simulated', profile, ...identity, peers: [peer], scenario: null, clockProtection: 'simulated', aiProvider: capabilities.provider } });
     }
     const owner = nodes.get('B')!, requester = nodes.get('A')!;
     let spaceId: string;
