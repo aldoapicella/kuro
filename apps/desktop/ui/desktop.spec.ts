@@ -14,8 +14,14 @@ const text = 'The KURO pilot remains provisional.';
 async function launch(mode: 'demo' | 'core-simulated' | 'real') {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'kuro-desktop-ui-')));
   const entry = join(directory, 'entry.mjs');
+  // This startup regression covers unavailable protection without an interactive
+  // Keychain prompt. Native protection is exercised by the packaged probe and real.spec.ts.
+  const unavailableProtection = mode === 'real' ? `
+safeStorage.isEncryptionAvailable = () => false;
+safeStorage.encryptString = safeStorage.decryptString = () => { throw new Error('Unexpected keychain access'); };
+` : '';
   // Test-only entry isolates appData before loading the unchanged production host.
-  await writeFile(entry, `import { app } from 'electron';\napp.setPath('appData', ${JSON.stringify(directory)});\nawait import(${JSON.stringify(pathToFileURL(join(workspace, 'build/desktop/host/main.js')).href)});\n`);
+  await writeFile(entry, `import { app, safeStorage } from 'electron';\napp.setPath('appData', ${JSON.stringify(directory)});\n${unavailableProtection}\nawait import(${JSON.stringify(pathToFileURL(join(workspace, 'build/desktop/host/main.js')).href)});\n`);
   let runtime: ElectronApplication | undefined;
   try {
     runtime = await _electron.launch({ executablePath, args: [entry, ...(mode === 'real' ? [] : [`--mode=${mode}`])], timeout: 30_000 });
@@ -37,7 +43,7 @@ async function profile(runtime: ElectronApplication, name: 'A' | 'B'): Promise<P
   throw new Error(`Missing profile ${name}`);
 }
 
-test('default real startup keeps setup and model preparation reachable before any protected workspace exists', async () => {
+test('default real startup keeps setup and models reachable when key protection is unavailable', async () => {
   const app = await launch('real');
   try {
     const page = app.runtime.windows()[0]!;
@@ -48,6 +54,7 @@ test('default real startup keeps setup and model preparation reachable before an
     await expect(page.getByLabel('Private bootstrap host', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save profile and start workspace', exact: true })).toBeVisible();
     await expect(page.getByText(/Runtime: unconfigured/)).toBeVisible();
+    await expect(page.getByText(/Key protection: unavailable/)).toBeVisible();
     await page.getByRole('button', { name: 'Models', exact: true }).click();
     await expect(page.getByText(/missing · 0%/)).toHaveCount(2);
     for (const kind of ['embedding', 'summary']) await expect(page.getByRole('button', { name: `Prepare ${kind} model`, exact: true })).toBeVisible();
