@@ -41,6 +41,7 @@ export class FakeAppPort {
       enrollMember: bind('enrollMember', i => admin(i.spaceId, i.expectedRevision)),
       setMember: bind('setMember', i => admin(i.spaceId, i.expectedRevision)),
       setRelationship: bind('setRelationship', i => admin(i.spaceId, i.expectedRevision)),
+      revokeDevice: bind('revokeDevice', i => admin(i.spaceId, i.expectedRevision)),
       pairPeer: bind('pairPeer', () => null),
       refreshSpace: bind('refreshSpace', i => { if (this.scenario === 'offline') throw new KuroError('PEER_OFFLINE'); const space = this.space(i.spaceId); space.syncState = 'CURRENT'; space.remainingValidityMs = 900000; this.notify('space', i.spaceId); return { requestId: this.next() }; }),
       setLocalPolicy: bind('setLocalPolicy', i => admin(i.spaceId, i.expectedRevision, true)),
@@ -57,6 +58,9 @@ export class FakeAppPort {
         this.notify('request', requestId); return { requestId };
       }),
       getState: bind('getState', () => this.state),
+      getSpaceAdministration: bind('getSpaceAdministration', i => ({ space: this.space(i.spaceId), scope: 'owner', tombstoned: false, members: [{ memberId: DEMO_OWNER.memberId, active: true, capabilities: ['search', 'read', 'share', 'receive', 'manage'], validUntilMs: null, devices: [{ publicKey: DEMO_OWNER.publicKey, spaceAlias: demoId(10), revoked: false }] }, { memberId: DEMO_REQUESTER.memberId, active: true, capabilities: ['search', 'read', 'share', 'receive', 'manage'], validUntilMs: null, devices: [{ publicKey: DEMO_REQUESTER.publicKey, spaceAlias: demoId(11), revoked: false }] }], relationships: [{ memberId: DEMO_OWNER.memberId, otherMemberId: DEMO_REQUESTER.memberId, allowed: true, validUntilMs: null }] })),
+      getLocalGrants: bind('getLocalGrants', i => ({ spaceId: i.spaceId, policyEpoch: this.space(i.spaceId).policyEpoch, canEdit: true, grants: [{ memberId: DEMO_OWNER.memberId, admitted: true, actions: ['search', 'read', 'share', 'receive', 'manage'], validUntilMs: null }, { memberId: DEMO_REQUESTER.memberId, admitted: true, actions: ['search', 'read', 'share', 'receive', 'manage'], validUntilMs: null }] })),
+      getDocumentRules: bind('getDocumentRules', i => { const document = this.state.documents.find(d => d.spaceId === i.spaceId && d.documentId === i.documentId); if (!document) throw new KuroError('ACCESS_DENIED'); return { spaceId: i.spaceId, documentId: i.documentId, revision: document.revision, rules: [{ memberId: DEMO_OWNER.memberId, actions: ['search', 'read', 'share', 'receive', 'manage'], validUntilMs: null }, { memberId: DEMO_REQUESTER.memberId, actions: ['receive'], validUntilMs: null }] }; }),
       listReviews: bind('listReviews', i => { this.space(i.spaceId); return [...this.reviews.values()].filter(r => r.spaceId === i.spaceId); }),
       getReview: bind('getReview', i => this.review(i.draftId)),
       reviseDraft: bind('reviseDraft', i => {

@@ -51,7 +51,7 @@ export class CustodyCore implements CoreLifecyclePort {
       createSpace:bind('createSpace',i=>this.#authority.createSpace(i)),pairSpace:bind('pairSpace',i=>this.#authority.pairSpace(i)),
       replaceAuthority:bind('replaceAuthority',i=>this.#authority.replaceAuthority(i)),
       enrollMember:bind('enrollMember',i=>this.#authority.enrollMember(i)),setMember:bind('setMember',i=>this.#authority.setMember(i)),
-      setRelationship:bind('setRelationship',i=>this.#authority.setRelationship(i)),pairPeer:bind('pairPeer',async i=>{await this.#authority.pairPeer(i);return null;}),
+      setRelationship:bind('setRelationship',i=>this.#authority.setRelationship(i)),revokeDevice:bind('revokeDevice',i=>this.#authority.revokeDevice(i)),pairPeer:bind('pairPeer',async i=>{await this.#authority.pairPeer(i);return null;}),
       refreshSpace:bind('refreshSpace',i=>{const sync=this.#authority.beginSync(i.spaceId);return {requestId:sync.requestId};}),
       setLocalPolicy:bind('setLocalPolicy',i=>this.#authority.setLocalPolicy(i)),
       setDocumentRules:bind('setDocumentRules',i=>this.#store.transaction(()=>{
@@ -63,6 +63,13 @@ export class CustodyCore implements CoreLifecyclePort {
       })),
       importText:bind('importText',i=>this.#retrieval.importText(i)),setIndexProfile:bind('setIndexProfile',i=>this.#retrieval.setProfile(i)),
       submitQuestion:bind('submitQuestion',i=>this.#delivery.submit(i)),getState:bind('getState',()=>this.state()),
+      getSpaceAdministration:bind('getSpaceAdministration',i=>this.#authority.getSpaceAdministration(i.spaceId)),
+      getLocalGrants:bind('getLocalGrants',i=>this.#authority.getLocalGrants(i.spaceId)),
+      getDocumentRules:bind('getDocumentRules',i=>{
+        const document=this.#store.get<DocumentRow>('SELECT * FROM documents WHERE space_id=? AND document_id=?',i.spaceId,i.documentId);
+        if(!document)throw new KuroError('ACCESS_DENIED');
+        return this.#authority.getDocumentRules(i.spaceId,i.documentId,document.revision);
+      }),
       listReviews:bind('listReviews',i=>{
         this.#authority.authorizeLocal(i.spaceId,'read');
         return this.#store.all<ReviewRow>("SELECT * FROM reviews WHERE space_id=? AND state='REVIEW'",i.spaceId).map(r=>this.#retrieval.review(r.draft_id));

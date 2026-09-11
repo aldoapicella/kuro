@@ -7,7 +7,10 @@ import type { FromWorker, NetworkWorkerPort, ToWorker, WorkerConfig } from './wo
 export function runNetworkWorker(config: WorkerConfig, port: NetworkWorkerPort): void {
   const paired = new Set(config.pairedPeers);
   const localKeyPair = HyperDHT.keyPair(config.seed);
-  const dht = new HyperDHT({ bootstrap: config.bootstrap, ...(config.port === undefined ? {} : { port: config.port }), keyPair: localKeyPair });
+  // HyperDHT bootstrap nodes advertise an explicit IPv4 address, never a wildcard.
+  const bootstrapper = config.bootstrapPort === undefined ? undefined : HyperDHT.bootstrapper(config.bootstrapPort, config.bootstrap[0]!.host);
+  const dht = new HyperDHT({ bootstrap: config.bootstrap, ...(config.port === undefined ? {} : { port: config.port }), keyPair: localKeyPair,
+    ...(bootstrapper ? { ephemeral: false, firewalled: false } : {}) });
   const connectionPool = dht.pool();
   const sockets = new Map<string, Socket>();
   const attachedSockets = new Set<Socket>();
@@ -26,6 +29,8 @@ export function runNetworkWorker(config: WorkerConfig, port: NetworkWorkerPort):
   port.onMessage((message: ToWorker) => { void receive(message).catch((error: unknown) => fatal(error)); });
 
   async function start(): Promise<void> {
+    await bootstrapper?.fullyBootstrapped();
+    if (stopping) return;
     await dht.fullyBootstrapped();
     if (stopping) return;
     connectionPool.on('connection', (socket: Socket) => attachSocket(socket));
@@ -232,6 +237,7 @@ export function runNetworkWorker(config: WorkerConfig, port: NetworkWorkerPort):
     announcedSockets.clear();
     await server?.close();
     await dht.destroy();
+    await bootstrapper?.destroy();
     post({ type: 'stopped' });
     port.close();
   }

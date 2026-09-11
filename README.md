@@ -6,7 +6,7 @@ KURO lets participants query information held by trusted peers while each custod
 
 ## Project status
 
-The custody core, public TypeScript contracts, persistent SQLite workflow and authenticated HyperDHT transport are implemented. The manual core harness uses explicitly simulated AI/transport. The combined two-process coordinator supports actual QVAC, SQLite and HyperDHT, with explicit automated test approval; its output identifies the selected AI provider. The QVAC adapter implements the existing public AI contract, and its independent harness separates scripted tests from real model execution. Electron composition and physical offline-LAN operation remain separate integration gates.
+The custody core, public TypeScript contracts, persistent SQLite workflow, authenticated Bare transport, and desktop renderer are implemented. Source model downloads and a two-process packaged desktop workflow passed with actual QVAC, Bare, SQLite, and protected identities; approvals and requester-local summaries were explicit automated test actions. The rebuilt `b762992` package includes the model re-hash security fix and passed relocated host/native-lifecycle probes; its Linux/macOS CI is green. Full qualification of the final archive, offline GUI evidence, and release publication remain pending. See the [desktop guide](apps/desktop/README.md) and [release handoff](docs/development/mvp-release-handoff.md) for the exact evidence and limits.
 
 ## Design principles
 
@@ -22,6 +22,28 @@ See the [technical architecture](docs/architecture.md) for contracts, tradeoffs,
 The [D25 shared-space authority design](docs/decisions/D25-shared-space-authority.md) is implemented in the core: pinned owner administration, recipient projections, separate policy/publication counters, original-send leases, denial/replay checks and explicit namespace recovery. Local document policy and exact human approval remain required. See the [implementation handoff](docs/development/core-transport-handoff.md) for commands, evidence and external gates.
 
 ## Getting started
+
+### Desktop preview
+
+`0.1.0-preview.1` is prepared for arm64 **macOS 26.5 / Darwin 25.5.0 / build
+25F71** only. Real mode stays closed elsewhere; Linux is used for CI. The package
+is not yet published, so do not treat the repository as an installation download.
+
+Plan for 12 GiB free disk space: at least 8 GiB for the app, about 2 GiB for
+explicit model downloads, plus working cache. The only tested memory configuration
+is an M5 Pro with 48 GB unified memory. Open **Setup**, start a private LAN
+workspace, then use **Models** to explicitly prepare the QVAC GTE and Qwen
+weights. Downloads report progress, validate SHA-256, and can be cancelled or
+retried; no model weights are bundled. macOS may require manual SecurityAgent
+approval for protected keychain access. The [desktop installation guide](apps/desktop/README.md#install-a-published-preview) covers Finder installation, first launch, and application replacement without development tools.
+
+Use **Spaces** to create or join a space and explicitly select the LAN endpoint.
+Use **Permissions** to set shared membership, a local grant, and any document
+rule; all are default-deny. Importing documents does not grant access. The GUI
+keeps error codes visible and explains recovery steps for clock, permission,
+revision, model, network, identity, capacity, cancellation, and expiry failures.
+
+### Development
 
 ```sh
 git clone https://github.com/aldoapicella/kuro.git

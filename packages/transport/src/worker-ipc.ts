@@ -48,12 +48,13 @@ export function parseHostCommand(value: unknown): HostCommand {
     case 'init': {
       fields(m, ['type', 'config']);
       const c = object(m.config);
-      fields(c, ['seed', 'bootstrap', 'port', 'pairedPeers', 'maxConnections', 'maxBufferedBytes', 'maxQueuedSends', 'connectionTimeoutMs']);
+      fields(c, ['seed', 'bootstrap', 'port', 'pairedPeers', 'maxConnections', 'maxBufferedBytes', 'maxQueuedSends', 'connectionTimeoutMs', ...(Object.hasOwn(c, 'bootstrapPort') ? ['bootstrapPort'] : [])]);
       if (!Array.isArray(c.bootstrap) || !Array.isArray(c.pairedPeers)) throw invalid();
       return { type: 'init', config: {
         seed: unhex(c.seed, 32, 32),
         bootstrap: c.bootstrap.map((v: unknown) => { const b = object(v); fields(b, ['host', 'port']); return { host: string(b.host, 255), port: positive(b.port, 65_535) }; }),
         port: c.port === null ? undefined : positive(c.port, 65_535),
+        ...(c.bootstrapPort === undefined ? {} : { bootstrapPort: positive(c.bootstrapPort, 65_535) }),
         pairedPeers: c.pairedPeers.map(key), maxConnections: positive(c.maxConnections),
         maxBufferedBytes: positive(c.maxBufferedBytes), maxQueuedSends: positive(c.maxQueuedSends),
         connectionTimeoutMs: positive(c.connectionTimeoutMs),

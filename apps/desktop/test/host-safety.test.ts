@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { KuroError, success, failure } from '@kuro/contracts';
 import type { CoreLifecyclePort, VerifiedBinding } from '@kuro/contracts';
+import { FakeAppPort } from '../src/fake-app.js';
+import { unavailableSetup } from '../src/setup-unavailable.js';
 import { DesktopLifecycle } from '../src/lifecycle.js';
-import { trustedSender } from '../src/ipc-router.js';
+import { routeCall, trustedSender } from '../src/ipc-router.js';
 import { ProtectedSecretStore } from '../src/secret-store.js';
 import { formatBindingVerification } from '../src/selections.js';
 
@@ -90,4 +93,22 @@ test('protected secret creation returns one concurrent winner and cleans failed 
     await assert.rejects(failing.createIfAbsent('other-identity', Uint8Array.of(1)), /protector failed/);
     assert.equal((await readdir(directory)).some(name => name.endsWith('.pending')), false);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('closed authorization still permits bounded setup and stop, never protected IPC', async () => {
+  const fake = new FakeAppPort('A');
+  let stopped = 0;
+  const host = { ...unavailableSetup(fake.info()), selectText: async () => success(null), selectPairing: async () => success(null), setScenario: async () => failure('ACCESS_DENIED'), getInfo: async () => success(fake.info()), stopWorkspace: async () => { stopped++; return success(null); } };
+  const binding = { senderId: 7, url: 'file:///trusted', app: fake.app, host, checkpoint: () => { throw new KuroError('CLOCK_UNCERTAIN'); } };
+  const sender = { id: 7, isMainFrame: true, url: binding.url };
+  try {
+    assert.equal((await routeCall(binding, sender, 'host', 'getSetup', {})).ok, true);
+    assert.equal((await routeCall(binding, sender, 'host', 'stopWorkspace', {})).ok, true);
+    assert.equal(stopped, 1);
+    assert.deepEqual(await routeCall(binding, sender, 'host', 'getInfo', {}), failure('CLOCK_UNCERTAIN'));
+    assert.deepEqual(await routeCall(binding, sender, 'app', 'getState', {}), failure('CLOCK_UNCERTAIN'));
+    assert.equal((await routeCall(binding, sender, 'host', 'getSetup', { path: '/private' })).ok, false);
+    assert.equal((await routeCall(binding, { ...sender, isMainFrame: false }, 'host', 'stopWorkspace', {})).ok, false);
+    assert.equal(stopped, 1);
+  } finally { fake.close(); }
 });
