@@ -49,7 +49,7 @@ jobs:
         run: node --test apps/desktop/test/macos-native-deps.test.mjs scripts/release-runner-guard.test.mjs
       - name: Verify release metadata and qualification gates
         run: |
-          node --test scripts/release-validate.test.mjs
+          node --test scripts/release-validate.test.mjs scripts/offline-gui-qualification.test.mjs
           node --check scripts/qualify-release.mjs
           node --check scripts/offline-gui.mjs
           node --check apps/desktop/ui/remote-driver.mjs

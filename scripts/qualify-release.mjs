@@ -73,7 +73,7 @@ try {
   suite.push(await command('qvac-worker', 'pnpm', ['--filter', '@kuro/ai', 'probe:runtime']));
   suite.push(await command('transport-harness', 'pnpm', ['--filter', '@kuro/transport-harness', 'smoke']));
   suite.push(await command('core-harness', 'pnpm', ['--filter', '@kuro/transport-harness', 'core-smoke']));
-  suite.push(await command('release-helper-tests', process.execPath, ['--test', 'apps/desktop/test/macos-native-deps.test.mjs', 'scripts/release-validate.test.mjs', 'scripts/release-runner-guard.test.mjs']));
+  suite.push(await command('release-helper-tests', process.execPath, ['--test', 'apps/desktop/test/macos-native-deps.test.mjs', 'scripts/release-validate.test.mjs', 'scripts/release-runner-guard.test.mjs', 'scripts/offline-gui-qualification.test.mjs']));
   await passed('source-suite', suite);
 
   temporary = await realpath(await mkdtemp(join(tmpdir(), 'kuro-qualified-release-')));
