@@ -19,7 +19,7 @@ export async function runLifecycleProbe(powerEvents?: () => number) {
   const directory = await mkdtemp(join(tmpdir(), 'kuro-lifecycle-probe-'));
   let runtime: Awaited<ReturnType<typeof createSimulatedDesktop>> | undefined;
   try {
-    runtime = await createSimulatedDesktop(directory, clock);
+    runtime = await createSimulatedDesktop(directory, { clock });
     const owner = runtime.nodes.get('B')!, requester = runtime.nodes.get('A')!;
     const lifecycle = new DesktopLifecycle([owner.core, requester.core], undefined, clock);
     value(await requester.app.submitQuestion({ spaceId: runtime.spaceId, custodianKey: owner.info.publicKey, query: 'What are the KURO pilot release conditions?', ttlSeconds: 3600 }));

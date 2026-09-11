@@ -13,6 +13,8 @@ export const DesktopInfoSchema = z.strictObject({
   memberId: IDSchema, publicKey: KeySchema, scenario: DesktopScenarioSchema.nullable(),
   peers: z.array(z.strictObject({ memberId: IDSchema.nullable(), publicKey: KeySchema })).max(32),
   clockProtection: z.enum(['simulated', 'closed', 'native']),
+  /** Reported separately from `mode`: a simulated transport can still run real local models. */
+  aiProvider: z.enum(['qvac', 'simulated']),
 });
 export type DesktopInfo = z.infer<typeof DesktopInfoSchema>;
 export const DesktopCommands = {

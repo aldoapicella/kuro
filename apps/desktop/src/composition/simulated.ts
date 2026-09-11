@@ -4,20 +4,32 @@ import { openCore, SelectedTextFiles, secureIds, systemClock } from '@kuro/core'
 import { FakeAiPort, FakeSession } from '@kuro/core/testing';
 import { MemoryNetwork, MemoryTransport } from '@kuro/transport';
 import { KuroError, IDSchema } from '@kuro/contracts';
-import type { AppPort, Capability, Clock, DesktopInfo, Result } from '@kuro/contracts';
+import type { AiPort, AppPort, Capability, Clock, DesktopInfo, Result } from '@kuro/contracts';
 import type { CustodyCore } from '@kuro/core';
 import { VerifiedPairings } from '../selections.js';
 import { DEMO_OWNER, DEMO_REQUESTER, DEMO_TEXT } from '../fake-app.js';
 
 export interface SimulatedNode {
-  app: AppPort; core: CustodyCore; ai: FakeAiPort;
+  app: AppPort; core: CustodyCore; ai: AiPort;
   files: SelectedTextFiles; pairing: VerifiedPairings; info: DesktopInfo;
 }
 const ALL: Capability[] = ['search', 'read', 'share', 'receive', 'manage'];
 export function value<T>(result: Result<T>): T { if (!result.ok) throw new KuroError(result.error.code); return result.value; }
 
-/** Real core/SQLite at both ends; deterministic AI and transport are explicitly simulated. */
-export async function createSimulatedDesktop(directory: string, clock: Clock = systemClock) {
+export interface SimulatedOptions {
+  clock?: Clock;
+  /**
+   * Supplies the AI port for each simulated device. Omitted, both devices use
+   * the deterministic FakeAiPort. Passing a QVAC-backed port runs real local
+   * embeddings and real local generation over the simulated transport, so the
+   * two windows exercise actual inference without a second physical host.
+   */
+  createAi?: (profile: 'A' | 'B') => AiPort;
+}
+
+/** Real core/SQLite at both ends; transport is always simulated, AI only when `createAi` is omitted. */
+export async function createSimulatedDesktop(directory: string, options: SimulatedOptions = {}) {
+  const clock = options.clock ?? systemClock;
   await mkdir(directory, { recursive: true, mode: 0o700 });
   // This directory is created by our host, not a renderer-selected document.
   // Canonicalize its macOS temporary-directory aliases without weakening import checks.
@@ -49,10 +61,11 @@ export async function createSimulatedDesktop(directory: string, clock: Clock = s
     for (const profile of ['B', 'A'] as const) {
       const identity = profile === 'A' ? DEMO_REQUESTER : DEMO_OWNER;
       const peer = profile === 'A' ? DEMO_OWNER : DEMO_REQUESTER;
-      const files = new SelectedTextFiles(), pairing = new VerifiedPairings(), ai = new FakeAiPort();
+      const files = new SelectedTextFiles(), pairing = new VerifiedPairings();
+      const ai: AiPort = options.createAi ? options.createAi(profile) : new FakeAiPort();
       const transport = new MemoryTransport({ network, publicKey: identity.publicKey, pairedPeers: [peer.publicKey] });
       const core = await openCore({ databasePath: join(directory, `${profile}.sqlite`), ai, transport, clock, ids: secureIds, sessions: new FakeSession({ memberId: identity.memberId, deviceKey: identity.publicKey, validUntilMs: Number.MAX_SAFE_INTEGER }), selectedFiles: files, pairing, clockInitiallyTrusted: true });
-      nodes.set(profile, { app: core.app, core, ai, files, pairing, info: { mode: 'core-simulated', profile, ...identity, peers: [peer], scenario: null, clockProtection: 'simulated' } });
+      nodes.set(profile, { app: core.app, core, ai, files, pairing, info: { mode: 'core-simulated', profile, ...identity, peers: [peer], scenario: null, clockProtection: 'simulated', aiProvider: options.createAi ? 'qvac' : 'simulated' } });
     }
     const owner = nodes.get('B')!, requester = nodes.get('A')!;
     let spaceId: string;
