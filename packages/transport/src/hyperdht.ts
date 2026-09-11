@@ -12,6 +12,8 @@ export interface HyperDhtTransportOptions {
   bootstrap: readonly WorkerBootstrap[];
   /** Optional local UDP port for a host running multiple DHT peers. */
   localPort?: number;
+  /** Explicit private-LAN bootstrap at the first bootstrap endpoint's IPv4 address/port. */
+  bootstrapPort?: number;
   pairedPeers?: Iterable<string>;
   maxConnections?: number;
   maxBufferedBytes?: number;
@@ -32,6 +34,7 @@ interface ResolvedOptions {
   secretName: string;
   bootstrap: readonly WorkerBootstrap[];
   localPort: number | undefined;
+  bootstrapPort: number | undefined;
   maxConnections: number;
   maxBufferedBytes: number;
   maxQueuedSends: number;
@@ -64,6 +67,7 @@ export class HyperDhtTransport implements TransportPort {
       secretName: options.secretName ?? 'kuro.transport.hyperdht.seed.v1',
       bootstrap: options.bootstrap.map((node) => ({ ...node })),
       localPort: options.localPort,
+      bootstrapPort: options.bootstrapPort,
       maxConnections: options.maxConnections ?? 16,
       maxBufferedBytes: options.maxBufferedBytes ?? MAX_FRAME_BYTES * 4,
       maxQueuedSends: options.maxQueuedSends ?? 32,
@@ -146,7 +150,9 @@ export class HyperDhtTransport implements TransportPort {
   removePair(peerKey: string): void { this.#pairs.delete(peerKey); this.#worker?.postMessage({ type: 'remove-pair', peerKey } satisfies ToWorker); }
 
   private workerConfig(seed: Uint8Array): WorkerConfig {
-    return { seed, bootstrap: this.#options.bootstrap, port: this.#options.localPort, pairedPeers: [...this.#pairs], maxConnections: this.#options.maxConnections, maxBufferedBytes: this.#options.maxBufferedBytes, maxQueuedSends: this.#options.maxQueuedSends, connectionTimeoutMs: this.#options.connectionTimeoutMs };
+    return { seed, bootstrap: this.#options.bootstrap, port: this.#options.localPort,
+      ...(this.#options.bootstrapPort === undefined ? {} : { bootstrapPort: this.#options.bootstrapPort }),
+      pairedPeers: [...this.#pairs], maxConnections: this.#options.maxConnections, maxBufferedBytes: this.#options.maxBufferedBytes, maxQueuedSends: this.#options.maxQueuedSends, connectionTimeoutMs: this.#options.connectionTimeoutMs };
   }
   private async startWorker(generation: number): Promise<void> {
     try {
@@ -196,6 +202,8 @@ export class HyperDhtTransport implements TransportPort {
   private validateOptions(): void {
     for (const node of this.#options.bootstrap) if (typeof node.host !== 'string' || node.host.length === 0 || !Number.isInteger(node.port) || node.port < 1 || node.port > 65_535) throw new Error('Invalid HyperDHT bootstrap node');
     if (this.#options.localPort !== undefined && (!Number.isInteger(this.#options.localPort) || this.#options.localPort < 1 || this.#options.localPort > 65_535)) throw new Error('Invalid HyperDHT local port');
+    if (this.#options.bootstrapPort !== undefined && (!Number.isInteger(this.#options.bootstrapPort) || this.#options.bootstrapPort < 1 || this.#options.bootstrapPort > 65_535 || this.#options.bootstrapPort === this.#options.localPort)) throw new Error('Invalid HyperDHT bootstrap port');
+    if (this.#options.bootstrapPort !== undefined && (this.#options.bootstrap[0]?.port !== this.#options.bootstrapPort || !this.#options.bootstrap[0]?.host.match(/^(?:\d{1,3}\.){3}\d{1,3}$/))) throw new Error('LAN hosting requires its explicit IPv4 bootstrap endpoint');
     for (const value of [this.#options.maxConnections, this.#options.maxQueuedSends]) if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid HyperDHT capacity limit');
     if (!Number.isSafeInteger(this.#options.maxBufferedBytes) || this.#options.maxBufferedBytes < MAX_FRAME_BYTES) throw new Error('Invalid HyperDHT receive buffer limit');
     for (const value of [this.#options.connectionTimeoutMs, this.#options.startupTimeoutMs, this.#options.shutdownTimeoutMs]) if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid HyperDHT timeout');

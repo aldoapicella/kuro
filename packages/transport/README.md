@@ -8,6 +8,17 @@ The Node adapter waits for the SDK's encrypted-stream flush, which confirms unde
 
 The host supplies an explicit `bootstrap` list and protected `secretStore`. Optional `localPort` selects the local UDP port when several nodes share a host; omission uses the library default. Defaults are 16 peer connections, 32 queued sends, a 10,000 ms deadline for an active connection/send attempt, 10,000 ms startup deadline and 5,000 ms shutdown deadline. Each send makes at most four attempts with identical bytes; its flush window is one quarter of the configured connection deadline, capped by the remaining time. HyperDHT's connection pool elects duplicate connections. Changing a paired key requires explicit host pairing; display names have no authority.
 
+An explicit `bootstrapPort` additionally hosts a private LAN bootstrap in the same
+Bare worker and makes its ordinary DHT node persistent for routing. The first
+`bootstrap` entry must contain this device's advertised IPv4 address and the same
+port; a wildcard address is not a valid HyperDHT advertisement. The content peer
+port must differ. Omit this option on joining devices and point their bootstrap
+entry at the hosting device. Shutdown closes both DHT instances before acknowledging
+success. Hosting supplies discovery/routing only and never pairs peers or grants
+permissions. `test/lan.test.ts` runs five authenticated exact-byte deliveries plus
+fresh recipient restart using this host option; it is a same-host real Bare test,
+not physical LAN qualification.
+
 `MemoryTransport` and `MemoryNetwork` are explicit test providers. Their `flush()` operation deterministically delivers queued frames and supports configured `loss`, `duplicate`, `delay`, `reorder`, and `disconnect` faults, plus bounded pending-frame and connection limits. It is never an automatic fallback for the real adapter. `runTransportConformance` is the shared D25 ACTIVE-response suite used by both the memory tests and the two-process real-provider harness.
 
 State synchronization is direct-authenticated and read-only: transport carries the messages and authenticated keys, while core validates snapshots, counters, leases, and local-policy intersection. See [D25](../../docs/decisions/D25-shared-space-authority.md).

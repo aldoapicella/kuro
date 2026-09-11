@@ -3,6 +3,7 @@ export interface WorkerConfig {
   seed: Uint8Array;
   bootstrap: readonly WorkerBootstrap[];
   port: number | undefined;
+  bootstrapPort?: number;
   pairedPeers: readonly string[];
   maxConnections: number;
   maxBufferedBytes: number;
