@@ -84,10 +84,23 @@ The relocated packaged `--probe=lifecycle` passed on Electron 44.3.0 / Node 24.2
 required fresh authority synchronization and recovered authorized evidence. AI/transport
 and power events in this probe are explicitly simulated; it does not prove physical sleep.
 
-`--probe=lifecycle-sleep` provides the remaining physical check. It prints `ready-for-sleep`,
+`--probe=lifecycle-sleep` provides the physical check. It prints `ready-for-sleep`,
 then blocks JavaScript event dispatch for at most 90 seconds while polling the native Clock.
 Suspend and wake the Mac during that interval. Success requires an actual changed native
 sleep generation, a closed gate before any JavaScript power callback, discarded pending
 evidence, and fresh authority synchronization before evidence becomes readable again.
 It creates only temporary synthetic state and does not initiate sleep itself.
-Physical sleep validation is pending; no such result is claimed by the injected probe.
+On September 11, 2026, this physical check passed using the relocated unsigned package
+from `899203e` (merged as `0d5d2dd`), on macOS 26.5 / Darwin 25.5.0 / build 25F71 arm64,
+Electron 44.3.0 and Node 24.20.0. All 943 dependency symlinks stayed inside the relocated
+distribution. The test read 10,000 actual native samples in 2.80 ms, then deliberately
+blocked JavaScript event dispatch while an authorized `pmset sleepnow` suspended the Mac.
+The OS log recorded software sleep at 01:56:35 -0500, a hardware dark wake at 01:56:47,
+and full wake through user activity at 01:57:00. The native generation changed and closed
+both cores before any JavaScript power callback was observed. The pending evidence reply
+was discarded; trusted resume left participant authority stale; only a fresh correlated
+authority response restored access to the original evidence. The probe exited zero after
+48.604 seconds, restored the distribution and removed its temporary state/processes.
+Its polling resumed during dark wake, so the closing barrier did not depend on full wake
+or user interaction. AI and transport in this physical check remained explicitly simulated;
+actual QVAC/Bare custody integration is separate evidence, not inferred from this result.
