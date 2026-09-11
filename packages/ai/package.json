@@ -13,7 +13,8 @@
   "dependencies": {
     "@kuro/contracts": "workspace:*",
     "@qvac/inference": "0.19.0",
-    "@qvac/sdk": "0.19.0"
+    "@qvac/sdk": "0.19.0",
+    "require-asset": "1.2.2"
   },
   "devDependencies": {
     "@kuro/core": "workspace:*",
