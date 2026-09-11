@@ -17,16 +17,23 @@ import { ContextBudgetExceededError, QVAC_GENERATION_PROFILE, type QvacRuntime }
 function sameProfile(profile: GenerationProfile): boolean { return canonicalDigest(profile) === canonicalDigest(QVAC_GENERATION_PROFILE); }
 const byteLength = (value: string): number => new TextEncoder().encode(value).length;
 
+/**
+ * Constrained decoding must express the same status/claim coupling that
+ * SummaryResultSchema enforces: "answer" carries at least one claim and
+ * "insufficient" carries none. A single status enum lets the grammar emit
+ * {"status":"answer","claims":[]}, which the contract then rejects as
+ * INVALID_MODEL_OUTPUT — a self-inflicted failure on an answerable question.
+ */
 export function buildSummarySchema(aliases: readonly string[]): Record<string, unknown> {
-  return {
-    type: "object", additionalProperties: false, required: ["status", "claims"], properties: {
-      status: { enum: ["answer", "insufficient"] },
-      claims: { type: "array", maxItems: 4, items: { type: "object", additionalProperties: false, required: ["text", "sourceAliases"], properties: {
-        text: { type: "string", minLength: 1, maxLength: 400 },
-        sourceAliases: { type: "array", minItems: 1, maxItems: 4, items: { enum: [...aliases] } },
-      } } },
-    },
-  };
+  const claim = { type: "object", additionalProperties: false, required: ["text", "sourceAliases"], properties: {
+    text: { type: "string", minLength: 1, maxLength: 400 },
+    sourceAliases: { type: "array", minItems: 1, maxItems: 4, items: { enum: [...aliases] } },
+  } };
+  const branch = (status: string, claims: Record<string, unknown>) => ({
+    type: "object", additionalProperties: false, required: ["status", "claims"],
+    properties: { status: { const: status }, claims: { type: "array", items: claim, ...claims } },
+  });
+  return { anyOf: [branch("answer", { minItems: 1, maxItems: 4 }), branch("insufficient", { maxItems: 0 })] };
 }
 
 /**
