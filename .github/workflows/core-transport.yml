@@ -44,6 +44,7 @@ jobs:
       - name: Configure Linux Chromium sandbox helpers
         if: runner.os == 'Linux'
         run: |
+          pnpm --filter @kuro/desktop exec install-electron
           desktop_sandbox="$(pnpm --filter @kuro/desktop exec node -p "require('path').join(require('path').dirname(require('electron')), 'chrome-sandbox')")"
           packaged_sandbox="build/packages/KURO-linux-$(node -p process.arch)/chrome-sandbox"
           sudo chown root:root "$desktop_sandbox" "$packaged_sandbox"

@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import HyperDHT from 'hyperdht';
 import { encodeWire } from '@kuro/contracts';
-import { HyperDhtTransport, InMemorySecretStore } from '../src/index.js';
+import { HyperDhtTransport, HyperDhtTransportError, InMemorySecretStore } from '../src/index.js';
 
 test('concurrent stops serialize a same-identity restart before a new send', async () => {
   const bootstrapper = HyperDHT.bootstrapper(await reserveUdpPort(), '127.0.0.1');
@@ -29,12 +29,11 @@ test('concurrent stops serialize a same-identity restart before a new send', asy
     await right.stop();
     assert.equal((await right.start()).publicKey, rightKey);
     const body = encodeWire({ v: 1, type: 'CLOSED', requestId: '1'.repeat(32), spaceAlias: '2'.repeat(32) });
-    const received = new Promise<Uint8Array>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Timed out waiting for restarted transport send')), 10_000);
-      right.subscribe((event) => { if (event.type === 'message') { clearTimeout(timer); resolve(event.bytes); } });
-    });
-    await left.send(rightKey, body);
-    assert.deepEqual(await received, body);
+    const received = observeMessage(right);
+    try {
+      const [, bytes] = await Promise.all([sendUntilAccepted(left, rightKey, body), received.promise]);
+      assert.deepEqual(bytes, body);
+    } finally { received.dispose(); }
   } finally {
     await Promise.allSettled([left.stop(), right.stop()]);
     await router.destroy(); await bootstrapper.destroy();
@@ -129,6 +128,37 @@ async function waitForWorker(workers: ControlledWorker[], index: number): Promis
 }
 function isSend(message: unknown): message is { type: 'send'; id: number } {
   return typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'send' && typeof (message as { id?: unknown }).id === 'number';
+}
+function observeMessage(transport: HyperDhtTransport): { promise: Promise<Uint8Array>; dispose(): void } {
+  let settled = false;
+  let timer: NodeJS.Timeout | undefined;
+  let unsubscribe = () => {};
+  const cleanup = () => {
+    if (settled) return;
+    settled = true;
+    if (timer !== undefined) clearTimeout(timer);
+    unsubscribe();
+  };
+  const promise = new Promise<Uint8Array>((resolve, reject) => {
+    timer = setTimeout(() => { cleanup(); reject(new Error('Timed out waiting for restarted transport send')); }, 10_000);
+    unsubscribe = transport.subscribe((event) => {
+      if (event.type === 'message') { cleanup(); resolve(event.bytes); }
+    });
+  });
+  return { promise, dispose: cleanup };
+}
+async function sendUntilAccepted(sender: HyperDhtTransport, peerKey: string, bytes: Uint8Array): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let lastOffline: HyperDhtTransportError | undefined;
+  while (Date.now() < deadline) {
+    try { await sender.send(peerKey, bytes); return; }
+    catch (error) {
+      if (!(error instanceof HyperDhtTransportError) || error.code !== 'PEER_OFFLINE') throw error;
+      lastOffline = error;
+      await delay(25);
+    }
+  }
+  throw lastOffline ?? new Error('Timed out waiting for restarted transport send');
 }
 async function sendUntilBytes(sender: HyperDhtTransport, peerKey: string, bytes: Uint8Array, received: Uint8Array[]): Promise<void> {
   const deadline = Date.now() + 5_000;
