@@ -2,7 +2,7 @@
 
 The TypeScript custody workflow is implemented with real local SQLite: authenticated admission, authorization before ranking, stored human review, atomic approval/outbox, exact-byte retries, durable inbox before ACK, and optional private summary manifests. Shared authority follows D25, including original-send leases and explicit namespace recovery. The transport uses the actual HyperDHT stack in a Node worker. The manual core harness deliberately uses simulated AI and transport.
 
-This is a module handoff. Real QVAC inference, Electron composition, Bare/Pear packaging, and physical two-device offline-LAN operation remain separate, unverified integration gates. No simulation automatically substitutes for an unavailable real adapter.
+This is a module handoff. Standalone QVAC embedding/generation is now verified by the [AI harness](../../harnesses/ai/README.md). The complete host workflow with real QVAC, Electron composition, Bare/Pear packaging, and physical two-device offline-LAN operation remain separate integration gates. No simulation automatically substitutes for an unavailable real adapter.
 
 ## Install and run
 
@@ -21,7 +21,7 @@ pnpm --filter @kuro/core-harness harness -- --state /tmp/kuro-core-demo
 
 The harness state directory must initially be empty. Follow the [core harness commands](../../harnesses/core/README.md) for explicit review and approval, lost ACK, restart, revocation, authority expiry, and model-free evidence reading. `init` never approves evidence. `approve` requires the printed draft ID, revision, and view digest. The harness's `restart` is an orderly close/reopen; separate automated tests perform real process termination.
 
-`pnpm build` emits JavaScript, declarations, and source maps under ignored `dist/`. Public workspace exports currently resolve TypeScript source for `tsx` development. Desktop bundling must consume these exports and package the worker explicitly. No Electron or QVAC dependencies have been added to their independently owned modules.
+`pnpm build` emits JavaScript, declarations, and source maps under ignored `dist/`. Public workspace exports currently resolve TypeScript source for `tsx` development. Desktop bundling must consume these exports and package the worker explicitly. QVAC dependencies and a conforming AI adapter are now provided by `@kuro/ai`; Electron host composition remains pending.
 
 ## Public integration points
 
@@ -30,6 +30,7 @@ The harness state directory must initially be empty. Follow the [core harness co
 | `@kuro/contracts` | Strict `AppCommands`/`AppPort`, `AiPort`, `TransportPort`, host interfaces, all seven wire messages, canonical digests, schemas, limits, states, typed errors. |
 | `@kuro/core` | `openCore`, `CustodyCore`, `CoreOptions`, `SelectedTextFiles`, `systemClock`, `secureIds`. Only `core.app` belongs behind renderer IPC. |
 | `@kuro/core/testing` | Named deterministic `FakeAiPort`, clocks, IDs, session/pairing, and selected-file simulations. |
+| `@kuro/ai` | `createAiAdapter` provides an `AiPort` and separate host close handle; pinned profiles and explicit scripted testing exports. See [D27](../decisions/D27-qvac-adapter-integration.md). |
 | `@kuro/transport` | `HyperDhtTransport`, framing utilities, and explicitly simulated `MemoryTransport`/`MemoryNetwork`; shared provider conformance helper. |
 
 See the [core composition example](../../packages/core/README.md) and [D26 contract decision](../decisions/D26-runtime-and-contract-checkpoint.md). Host dependencies bind local identity, verified one-time pairing selections, bounded selected files, clock validity, and protected identity storage. The renderer cannot choose the acting identity or inject a document path. Lifecycle controls remain separate from `AppPort`.
@@ -76,7 +77,7 @@ Initial validation exposed and corrected D25 parser round trips, lifecycle/expir
 
 | Baseline | Observable evidence |
 | --- | --- |
-| B01 | Explicit simulated AI; no model call on receipt/read and unavailable generation preserves evidence. Real QVAC is a pending gate. |
+| B01 | Explicit simulated AI; no model call on receipt/read and unavailable generation preserves evidence. Real-model smoke evidence is recorded separately in [D27](../decisions/D27-qvac-adapter-integration.md); host composition remains pending. |
 | B02, B13 | `authority.test.ts`: missing predicates, membership/grant/capability intersection, manage versus owner, local ACL restrictions, verified pinning, namespace recovery. |
 | B03 | `workflow.test.ts`: restricted and cross-space sentinel text/vectors never enter the AI ranker, review or delivery. SQL predicates precede candidate materialization. |
 | B04 | `workflow.test.ts`, `crash.test.ts`: rollback/concurrent approval and SIGKILL before/after commit preserve atomic approval/dependencies/outbox. |
@@ -106,7 +107,7 @@ The Python reference suite is separate regression evidence; it does not prove th
 ## External gates and next checks
 
 1. **Electron host:** provide the selected Electron version/build. Run `scripts/probe-host.mjs` in that application's main-process runtime and record `process.versions`, SQLite, FTS5, foreign keys and disk reopen. Repeat the core lifecycle tests through the actual host suspend/resume barrier. Verify the OS secret adapter reports protected storage, rejects unavailable/Linux `basic_text`, and implements `createIfAbsent` atomically across processes with durable winning bytes. Terminal Node alone cannot close this gate.
-2. **QVAC adapter:** provide a conforming `AiPort` and available local embedding/generation profiles. Inject it through `openCore`, run the same authorized-sentinel and manifest checks, then the manual request → review → explicit approval → evidence → explicit summary sequence. Record model/profile identity and actual inference. Keep evidence readable with the model unloaded. No QVAC implementation has been replaced here.
+2. **QVAC application integration:** the conforming adapter and combined SQLite/sentinel/manifest test now exist in `packages/ai`. That integration test uses a scripted backend. Run the manual request → review → explicit approval → evidence → explicit summary sequence through the actual host and QVAC models. Keep evidence readable with the model unloaded. The independent real-model harness and its results are documented in [D27](../decisions/D27-qvac-adapter-integration.md).
 3. **Bare/Pear runtime:** select and provide the intended host/toolchain and worker bridge. Package the HyperDHT worker through that runtime's verified APIs, keep authenticated key/byte semantics and bounded lifecycle behavior, and run the shared transport conformance suite. The current worker imports Node worker threads and is not a Bare package.
 4. **Physical offline LAN:** provide a second configured device and control of the intended LAN's external egress. Use an isolated HyperDHT bootstrap plus a persistent routing node, explicit known peer keys, and no public bootstrap fallback. Start both peers fresh with WAN disconnected while allowing their LAN/bootstrap ports. Exchange `SPACE_STATE_REQUEST` and the correlated authenticated projection, run the core evidence flow, stop/restart the recipient with the same protected identity, and verify exact retry/one inbox effect. Record devices, runtime versions, bootstrap/router addresses, interface/firewall policy, and failed external-connection control. Repeat after disconnect/reconnect. The bootstrap/peer runner and command protocol are documented in the [transport harness](../../harnesses/transport/README.md).
 
