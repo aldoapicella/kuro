@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, powerMonitor, safeStorage } from 'electron';
-import { readFile, mkdir, writeFile, rm, open, realpath } from 'node:fs/promises';
+import { readFile, mkdir, rm, open, realpath } from 'node:fs/promises';
 import { constants, renameSync } from 'node:fs';
 import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -14,17 +14,19 @@ import { ProtectedSecretStore } from './secret-store.js';
 import { DesktopLifecycle } from './lifecycle.js';
 import { formatBindingVerification } from './selections.js';
 import { unavailableSetup } from './setup-unavailable.js';
+import { ProfileRuntime } from './profile-runtime.js';
+import { IDSchema, KeySchema } from '@kuro/contracts';
 import type { VerifiedPairings } from './selections.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rendererPath = resolve(here, '../renderer/index.html');
 const rendererURL = pathToFileURL(rendererPath).href;
 const argument = (name: string): string | undefined => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-const mode = argument('mode') ?? 'demo';
+const mode = argument('mode') ?? 'real';
 const profile = argument('profile') ?? 'A';
 if (!['demo', 'core-simulated', 'real'].includes(mode) || !['A', 'B'].includes(profile)) throw new Error('Use --mode=demo|core-simulated|real and --profile=A|B');
 app.setName('KURO');
-const dataDirectory = join(app.getPath('appData'), 'KURO', mode, mode === 'core-simulated' ? 'AB' : profile);
+const dataDirectory = argument('user-data-dir') ? resolve(argument('user-data-dir')!) : join(app.getPath('appData'), 'KURO', mode, mode === 'core-simulated' ? 'AB' : profile);
 app.setPath('userData', dataDirectory);
 const bindings = new Map<number, WindowBinding>();
 let stop = async (): Promise<void> => {};
@@ -42,53 +44,68 @@ const invalidateViews = (): void => {
 };
 
 interface NodeBinding {
-  app: AppPort; info: DesktopInfo; files?: SelectedTextFiles; pairing?: VerifiedPairings;
+  app: AppPort; info: DesktopInfo; files?: SelectedTextFiles | undefined; pairing?: VerifiedPairings | undefined;
   fake?: FakeAppPort; pairVerified?: (binding: VerifiedBinding, check: () => void) => Promise<void>;
   checkpoint?: () => number;
+  profileRuntime?: ProfileRuntime;
 }
 
 async function selectBinding(window: BrowserWindow, check: () => void): Promise<VerifiedBinding | null> {
   const selected = await dialog.showOpenDialog(window, { title: 'Select a KURO pairing record', properties: ['openFile'], filters: [{ name: 'KURO pairing record', extensions: ['json'] }] });
   check();
   if (selected.canceled || !selected.filePaths[0]) return null;
-  const path = resolve(selected.filePaths[0]);
-  if (await realpath(path) !== path) throw new KuroError('INVALID_INPUT');
-  check();
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  let binding: VerifiedBinding;
-  try {
-    const before = await handle.stat();
-    check();
-    if (!before.isFile() || before.size < 1 || before.size > 8192) throw new KuroError('INVALID_INPUT');
-    const bytes = Buffer.alloc(before.size);
-    const read = await handle.read(bytes, 0, bytes.length, 0);
-    const after = await handle.stat();
-    check();
-    if (read.bytesRead !== bytes.length || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new KuroError('STALE_REVISION');
-    binding = VerifiedBindingSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
-  } finally { await handle.close(); }
+  const binding = VerifiedBindingSchema.parse(await readSelectedRecord(selected.filePaths[0], check));
   check();
   const answer = await dialog.showMessageBox(window, { type: 'question', title: 'Verify this device', message: 'Compare every detail with the other person using a separate trusted channel.', detail: `${formatBindingVerification(binding)}\n\nThe file alone does not verify a person or space.`, buttons: ['Cancel', 'I verified all details'], defaultId: 0, cancelId: 0, noLink: true });
   check();
   return answer.response === 1 ? binding : null;
 }
 
+async function readSelectedRecord(selectedPath: string, check: () => void): Promise<unknown> {
+  const path = resolve(selectedPath);
+  if (await realpath(path) !== path) throw new KuroError('INVALID_INPUT');
+  check();
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat(); check();
+    if (!before.isFile() || before.size < 1 || before.size > 8192) throw new KuroError('INVALID_INPUT');
+    const bytes = Buffer.alloc(before.size);
+    const read = await handle.read(bytes, 0, bytes.length, 0);
+    const after = await handle.stat(); check();
+    if (read.bytesRead !== bytes.length || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new KuroError('STALE_REVISION');
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } finally { await handle.close(); }
+}
+
+async function exportRecord(window: BrowserWindow, name: string, value: unknown, check: () => void): Promise<{ displayName: string } | null> {
+  const selected = await dialog.showSaveDialog(window, { title: 'Save public KURO verification record', defaultPath: name, filters: [{ name: 'KURO record', extensions: ['json'] }] });
+  check();
+  if (selected.canceled || !selected.filePath) return null;
+  const path = resolve(selected.filePath), temporary = join(dirname(path), `.kuro-${randomBytes(16).toString('hex')}.pending`);
+  try {
+    const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try { await handle.writeFile(JSON.stringify(value, null, 2)); await handle.sync(); } finally { await handle.close(); }
+    check(); renameSync(temporary, path);
+    return { displayName: basename(path).slice(0, 255) };
+  } finally { await rm(temporary, { force: true }); }
+}
+
 async function createWindow(node: NodeBinding): Promise<BrowserWindow> {
   const window = new BrowserWindow({ width: 1420, height: 940, minWidth: 1020, minHeight: 700, show: false, title: `KURO | Device ${node.info.profile}`, backgroundColor: '#f6f7f9', webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false, devTools: !app.isPackaged } });
   let selecting = false;
-  const select = async <T>(operation: (check: () => void) => Promise<T>) => {
+  const select = async <T>(operation: (check: () => void) => Promise<T>, protectedAccess = true) => {
     if (selecting) return failure('CAPACITY_EXCEEDED');
     selecting = true;
     try {
-      const epoch = node.checkpoint?.();
-      const check = () => { if (node.checkpoint?.() !== epoch) throw new KuroError('CLOCK_UNCERTAIN'); };
+      const epoch = protectedAccess ? node.checkpoint?.() : undefined;
+      const check = () => { if (window.isDestroyed()) throw new KuroError('CANCELLED'); if (protectedAccess && node.checkpoint?.() !== epoch) throw new KuroError('CLOCK_UNCERTAIN'); };
       const value = await operation(check); check(); return success(value);
     } catch (error) { return failure(error instanceof KuroError ? error.code : 'INVALID_INPUT'); }
     finally { selecting = false; }
   };
   const host: DesktopHostPort = {
     ...unavailableSetup(node.info),
-    getInfo: async () => success(node.fake ? node.fake.info() : structuredClone(node.info)),
+    getInfo: async () => { if (node.profileRuntime && !node.profileRuntime.running) return failure('ACCESS_DENIED'); return success(node.fake ? node.fake.info() : structuredClone(node.info)); },
     selectText: async () => select(async check => {
       if (node.fake) return { selectionId: demoId(90), displayName: 'synthetic-release-note.txt' };
       const picked = await dialog.showOpenDialog(window, { title: 'Import UTF-8 text', properties: ['openFile'], filters: [{ name: 'UTF-8 text', extensions: ['txt'] }] });
@@ -109,6 +126,44 @@ async function createWindow(node: NodeBinding): Promise<BrowserWindow> {
     }),
     setScenario: async input => { if (!node.fake) return failure('ACCESS_DENIED'); node.fake.reset(input.scenario); return success(null); },
   };
+  if (node.profileRuntime) {
+    const controller = node.profileRuntime;
+    const command = async <T>(operation: () => Promise<T>) => {
+      try { return success(await operation()); } catch (error) { return failure(error instanceof KuroError ? error.code : 'STORAGE_FAILURE'); }
+    };
+    Object.assign(host, {
+      getSetup: async () => command(() => controller.getSetup()),
+      saveProfile: async input => command(async () => { await controller.saveProfile(input); return null; }),
+      startWorkspace: async () => command(async () => { await controller.start(); return null; }),
+      stopWorkspace: async () => command(async () => { await controller.stop(); return null; }),
+      prepareModel: async input => command(async () => { await controller.models.prepare(input.kind); return null; }),
+      cancelModel: async input => command(async () => { await controller.models.cancel(input.kind); return null; }),
+      exportInvitation: async input => select(async check => {
+        const binding = await controller.invitation(input.spaceId); check();
+        return exportRecord(window, 'KURO-invitation.json', binding, check);
+      }),
+      exportEnrollment: async input => select(async check => {
+        const binding = await controller.enrollment(input.spaceId); check();
+        return exportRecord(window, 'KURO-enrollment.json', binding, check);
+      }),
+      exportIdentity: async () => select(async check => {
+        if (!controller.running) throw new KuroError('ACCESS_DENIED');
+        return exportRecord(window, 'KURO-linked-identity.json', { kind: 'kuro-linked-identity', version: 1, memberId: controller.info.memberId, sourceKey: controller.info.publicKey }, check);
+      }),
+      selectLinkedIdentity: async () => select(async check => {
+        const selected = await dialog.showOpenDialog(window, { title: 'Select your existing KURO identity record', properties: ['openFile'], filters: [{ name: 'KURO identity', extensions: ['json'] }] });
+        check(); if (selected.canceled || !selected.filePaths[0]) return null;
+        const record = await readSelectedRecord(selected.filePaths[0], check);
+        if (!record || typeof record !== 'object' || Array.isArray(record)) throw new KuroError('INVALID_INPUT');
+        const item = record as Record<string, unknown>;
+        if (Object.keys(item).sort().join(',') !== 'kind,memberId,sourceKey,version' || item.kind !== 'kuro-linked-identity' || item.version !== 1) throw new KuroError('INVALID_INPUT');
+        const memberId = IDSchema.parse(item.memberId), sourceKey = KeySchema.parse(item.sourceKey);
+        const answer = await dialog.showMessageBox(window, { type: 'question', title: 'Link your device identity', message: 'Verify this member and source device through a separate trusted channel.', detail: `Member: ${memberId}\nSource key: ${sourceKey}\n\nThis creates no membership or document grant. A space owner must separately enroll this new device.`, buttons: ['Cancel', 'I verified my identity'], defaultId: 0, cancelId: 0, noLink: true });
+        check(); if (answer.response !== 1) return null;
+        await controller.linkIdentity(memberId); check(); return { memberId, sourceKey };
+      }, false),
+    } satisfies Partial<DesktopHostPort>);
+  }
   const senderId = window.webContents.id;
   bindings.set(senderId, { senderId, url: rendererURL, app: node.app, host, ...(node.checkpoint ? { checkpoint: node.checkpoint } : {}) });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -209,43 +264,22 @@ else {
       timer = setInterval(() => { void runtime.pump().catch(suspendSafely); }, 500);
       for (const id of [profile, profile === 'A' ? 'B' : 'A'] as const) await createWindow({ ...runtime.nodes.get(id as 'A' | 'B')!, checkpoint: () => lifecycle.checkpoint() });
     } else {
-      const configurationPath = argument('config');
-      if (!configurationPath) throw new KuroError('INVALID_INPUT');
-      const { createRealDesktop, readRealConfiguration } = await import('./composition/real.js');
-      const configuration = readRealConfiguration(JSON.parse(await readFile(resolve(configurationPath), 'utf8')));
       const store = new ProtectedSecretStore(join(dataDirectory, 'secrets'), {
         protection: () => !safeStorage.isEncryptionAvailable() ? 'unavailable' : process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text' ? 'basic_text' : 'os-protected',
         encrypt: text => safeStorage.encryptString(text), decrypt: bytes => safeStorage.decryptString(Buffer.from(bytes)),
       });
-      const runtime = await createRealDesktop(dataDirectory, profile as 'A' | 'B', store, configuration);
-      const lifecycle = new DesktopLifecycle([runtime.core], () => runtime.ai.close(), runtime.clock, invalidateViews);
-      stop = () => lifecycle.close(); suspend = () => lifecycle.suspend(); resume = () => lifecycle.resume();
-      lock = () => lifecycle.lock(); unlock = () => lifecycle.unlock();
-      const peersPath = join(dataDirectory, 'verified-peers.json');
-      const records: VerifiedBinding[] = [];
-      const add = (binding: VerifiedBinding): void => {
-        const publicKey = binding.kind === 'authority' ? binding.authorityKey : binding.peerKey;
-        runtime.transport.pair(publicKey);
-        if (!runtime.info.peers.some(peer => peer.publicKey === publicKey)) runtime.info.peers.push({ publicKey, memberId: binding.kind === 'member' ? binding.memberId : null });
-      };
-      try {
-        const saved: unknown = JSON.parse(await readFile(peersPath, 'utf8'));
-        if (!Array.isArray(saved) || saved.length > 32) throw new KuroError('INVALID_INPUT');
-        for (const record of saved) { const binding = VerifiedBindingSchema.parse(record); records.push(binding); add(binding); }
-      } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error; }
-      await createWindow({ ...runtime, checkpoint: () => lifecycle.checkpoint(), pairVerified: async (binding, check) => {
-        if (records.length >= 32) throw new KuroError('CAPACITY_EXCEEDED');
-        const updated = [...records, binding];
-        const temporary = join(dataDirectory, `${randomBytes(16).toString('hex')}.json`);
-        let published = false;
-        try {
-          await writeFile(temporary, JSON.stringify(updated), { flag: 'wx', mode: 0o600 });
-          check();
-          // No await between final authorization, atomic publication and activation.
-          renameSync(temporary, peersPath); published = true; records.push(binding); add(binding);
-        } finally { if (!published) await rm(temporary, { force: true }); }
-      } });
-      timer = setInterval(() => { void lifecycle.tick().catch(suspendSafely); }, 500);
+      let sourceCommit: string | null = null, version = app.getVersion();
+      try { const manifest = JSON.parse(await readFile(resolve(here, '../package.json'), 'utf8')); if (/^[0-9a-f]{40}$/.test(manifest.sourceCommit)) sourceCommit = manifest.sourceCommit; if (typeof manifest.version === 'string') version = manifest.version; } catch {}
+      const controller = new ProfileRuntime(dataDirectory, profile as 'A' | 'B', store, version, invalidateViews, sourceCommit);
+      await controller.load();
+      stop = () => controller.close(); suspend = () => controller.suspend(); resume = () => controller.resume();
+      lock = () => controller.lock(); unlock = () => controller.unlock();
+      // Existing profiles resume using their saved network configuration. Failures remain
+      // visible in the content-free setup view, where users can stop, edit and retry.
+      if ((await controller.getSetup()).runtime === 'stopped') await controller.start().catch(() => {});
+      await createWindow({ app: controller.app, get info() { return controller.info; }, get files() { return controller.files; }, get pairing() { return controller.pairing; },
+        checkpoint: () => controller.checkpoint(), pairVerified: (binding, check) => controller.pairVerified(binding, check), profileRuntime: controller });
+      timer = setInterval(() => { void controller.tick().catch(suspendSafely); }, 500);
     }
     powerMonitor.on('suspend', suspendSafely);
     powerMonitor.on('lock-screen', () => { try { lock(); } catch {} });

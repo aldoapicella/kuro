@@ -36,7 +36,11 @@ export interface QvacRuntime {
   cancel(jobId: string): Promise<void>;
   close(): Promise<void>;
 }
-export interface QvacClientOptions { readonly embeddingFallbackSrc?: string | null; readonly generationFallbackSrc?: string | null; }
+export interface QvacClientOptions {
+  readonly embeddingFallbackSrc?: string | null; readonly generationFallbackSrc?: string | null;
+  /** Trusted host supplies already checksum-verified local weights. This disables registry and download lookup. */
+  readonly localModelPath?: (kind: 'embedding' | 'summary') => string | Promise<string>;
+}
 
 export class QvacClient implements QvacRuntime {
   readonly provider = "qvac" as const;
@@ -47,15 +51,22 @@ export class QvacClient implements QvacRuntime {
   readonly #guard = new ExecutionGuard();
   readonly #embeddingFallbackSrc: string | null;
   readonly #generationFallbackSrc: string | null;
+  readonly #localModelPath: QvacClientOptions['localModelPath'];
   constructor(options: QvacClientOptions = {}) {
     this.#embeddingFallbackSrc = options.embeddingFallbackSrc === undefined ? EMBEDDING_FALLBACK_SRC : options.embeddingFallbackSrc;
     this.#generationFallbackSrc = options.generationFallbackSrc === undefined ? GENERATION_FALLBACK_SRC : options.generationFallbackSrc;
+    this.#localModelPath = options.localModelPath;
   }
   get activeJobId(): string | null { return this.#guard.activeJobId; }
   async ensureEmbeddingModelLoaded(): Promise<string> {
     this.#assertOpen();
     if (this.#embeddingModelId === null) {
-      const load = loadModel({ modelSrc: GTE_LARGE_FP16, ...(this.#embeddingFallbackSrc === null ? {} : { fallbackSrc: this.#embeddingFallbackSrc }) });
+      const localPath = await this.#localModelPath?.('embedding');
+      this.#guard.throwIfCancelled();
+      if (this.#localModelPath && (typeof localPath !== "string" || !localPath.startsWith("/"))) throw new Error("Verified local model is unavailable");
+      const load = this.#localModelPath === undefined
+        ? loadModel({ modelSrc: GTE_LARGE_FP16, ...(this.#embeddingFallbackSrc === null ? {} : { fallbackSrc: this.#embeddingFallbackSrc }) })
+        : loadModel({ modelSrc: localPath!, modelType: 'llamacpp-embedding' });
       this.#guard.trackRequest(load.requestId);
       this.#embeddingModelId = await load;
       this.#guard.throwIfCancelled();
@@ -65,7 +76,12 @@ export class QvacClient implements QvacRuntime {
   async ensureGenerationModelLoaded(): Promise<string> {
     this.#assertOpen();
     if (this.#generationModelId === null) {
-      const load = loadModel({ modelSrc: QWEN3_1_7B_INST_Q4, modelConfig: { ctx_size: QVAC_GENERATION_PROFILE.contextTokens }, ...(this.#generationFallbackSrc === null ? {} : { fallbackSrc: this.#generationFallbackSrc }) });
+      const localPath = await this.#localModelPath?.('summary');
+      this.#guard.throwIfCancelled();
+      if (this.#localModelPath && (typeof localPath !== "string" || !localPath.startsWith("/"))) throw new Error("Verified local model is unavailable");
+      const load = this.#localModelPath === undefined
+        ? loadModel({ modelSrc: QWEN3_1_7B_INST_Q4, modelConfig: { ctx_size: QVAC_GENERATION_PROFILE.contextTokens }, ...(this.#generationFallbackSrc === null ? {} : { fallbackSrc: this.#generationFallbackSrc }) })
+        : loadModel({ modelSrc: localPath!, modelType: 'llamacpp-completion', modelConfig: { ctx_size: QVAC_GENERATION_PROFILE.contextTokens } });
       this.#guard.trackRequest(load.requestId);
       this.#generationModelId = await load;
       this.#guard.throwIfCancelled();

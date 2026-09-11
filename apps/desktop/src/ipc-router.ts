@@ -1,4 +1,4 @@
-import { AppCommands, AppOutputSchemas, DesktopCommands, DesktopOutputSchemas, ErrorSchema, KuroError, failure, success } from '@kuro/contracts';
+import { AppCommands, AppOutputSchemas, DesktopCommands, DesktopOutputSchemas, DESKTOP_RECOVERY_COMMANDS, ErrorSchema, KuroError, failure, success } from '@kuro/contracts';
 import type { AppCommandName, AppPort, DesktopHostPort, Result } from '@kuro/contracts';
 
 export interface Sender { id: number; isMainFrame: boolean; url: string }
@@ -10,7 +10,8 @@ export function trustedSender(sender: Sender, binding: WindowBinding): boolean {
 export async function routeCall(binding: WindowBinding, sender: Sender, surface: 'app' | 'host', name: string, input: unknown): Promise<Result<unknown>> {
   if (!trustedSender(sender, binding)) return failure('ACCESS_DENIED');
   try {
-    const epoch = binding.checkpoint?.();
+    const recovery = surface === 'host' && DESKTOP_RECOVERY_COMMANDS.has(name);
+    const epoch = recovery ? undefined : binding.checkpoint?.();
     if (surface === 'app') {
       if (!Object.hasOwn(AppCommands, name)) return failure('INVALID_INPUT');
       const key = name as AppCommandName;
@@ -28,7 +29,7 @@ export async function routeCall(binding: WindowBinding, sender: Sender, surface:
     if (!parsed.success) return failure('INVALID_INPUT');
     const command = binding.host[key] as (value: unknown) => Promise<Result<unknown>>;
     const result = await command(parsed.data);
-    if (binding.checkpoint?.() !== epoch) return failure('CLOCK_UNCERTAIN');
+    if (!recovery && binding.checkpoint?.() !== epoch) return failure('CLOCK_UNCERTAIN');
     return result.ok ? success(DesktopOutputSchemas[key].parse(result.value)) : { ok: false, error: ErrorSchema.parse(result.error) };
   } catch (error) { return failure(error instanceof KuroError ? error.code : 'STORAGE_FAILURE'); }
 }
