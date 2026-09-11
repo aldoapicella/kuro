@@ -64,7 +64,7 @@ export class Authority {
     this.store.transaction(() => {
       const changed = this.store.all<{ space_id: string }>("SELECT space_id FROM authority_spaces WHERE is_owner=0 AND cache_stale=0 AND sync_state NOT IN ('DENIED','UNPAIRED')");
       this.store.run('DELETE FROM pending_space_sync');
-      this.store.run("UPDATE authority_spaces SET cache_stale=1,sync_state=CASE WHEN sync_state='DENIED' THEN 'DENIED' ELSE 'STALE' END,next_refresh_wall_ms=? WHERE is_owner=0", wall);
+      this.store.run("UPDATE authority_spaces SET cache_stale=1,sync_state=CASE WHEN sync_state IN ('DENIED','EXPIRED') THEN sync_state ELSE 'STALE' END,next_refresh_wall_ms=? WHERE is_owner=0", wall);
       for (const { space_id } of changed) this.options.invalidate(space_id, 'stale');
     });
   }
@@ -77,7 +77,7 @@ export class Authority {
     this.store.transaction(() => {
       const changed = this.store.all<{ space_id: string }>("SELECT space_id FROM authority_spaces WHERE is_owner=0 AND cache_stale=0 AND sync_state NOT IN ('DENIED','UNPAIRED')");
       this.store.run('DELETE FROM pending_space_sync');
-      this.store.run("UPDATE authority_spaces SET cache_stale=1,sync_state=CASE WHEN sync_state='DENIED' THEN 'DENIED' ELSE 'STALE' END,next_refresh_wall_ms=? WHERE is_owner=0", wall);
+      this.store.run("UPDATE authority_spaces SET cache_stale=1,sync_state=CASE WHEN sync_state IN ('DENIED','EXPIRED') THEN sync_state ELSE 'STALE' END,next_refresh_wall_ms=? WHERE is_owner=0", wall);
       for (const { space_id } of changed) this.options.invalidate(space_id, 'stale');
     });
     this.#clockEpochValid = trusted;
@@ -627,7 +627,10 @@ export class Authority {
     const documentExpired = this.store.run('DELETE FROM document_acl WHERE space_id=? AND valid_until_ms IS NOT NULL AND valid_until_ms<=?', spaceId, wall).changes;
     if (localExpired || documentExpired) this.bumpPolicyEpoch(spaceId, 'expired');
     const fresh = this.space(spaceId);
-    if (!fresh.is_owner && !fresh.cache_stale && fresh.sync_state !== 'DENIED' && fresh.wall_deadline_ms != null && fresh.monotonic_deadline_ms != null && (wall >= fresh.wall_deadline_ms || mono >= fresh.monotonic_deadline_ms)) {
+    const leaseExpired = fresh.wall_deadline_ms != null && (
+      wall >= fresh.wall_deadline_ms || (!fresh.cache_stale && fresh.monotonic_deadline_ms != null && mono >= fresh.monotonic_deadline_ms)
+    );
+    if (!fresh.is_owner && !['DENIED','EXPIRED'].includes(fresh.sync_state) && leaseExpired) {
       this.store.run("UPDATE authority_spaces SET sync_state='EXPIRED',cache_stale=1 WHERE space_id=?", spaceId);
       this.bumpPolicyEpoch(spaceId, 'expired');
     }
@@ -637,7 +640,7 @@ export class Authority {
   private staleAllPositive(): void {
     const rows = this.store.all<{ space_id: string }>("SELECT space_id FROM authority_spaces WHERE tombstoned=0 AND (is_owner=1 OR (is_owner=0 AND cache_stale=0 AND sync_state!='DENIED'))");
     this.store.run('DELETE FROM pending_space_sync');
-    this.store.run("UPDATE authority_spaces SET cache_stale=1,sync_state=CASE WHEN sync_state='DENIED' THEN 'DENIED' ELSE 'STALE' END,next_refresh_wall_ms=NULL WHERE is_owner=0 AND tombstoned=0");
+    this.store.run("UPDATE authority_spaces SET cache_stale=1,sync_state=CASE WHEN sync_state IN ('DENIED','EXPIRED') THEN sync_state ELSE 'STALE' END,next_refresh_wall_ms=NULL WHERE is_owner=0 AND tombstoned=0");
     for (const row of rows) this.options.invalidate(row.space_id, 'stale');
   }
 
@@ -702,7 +705,7 @@ export class Authority {
     try { bytes = encodeWire(request); } catch { throw new KuroError('IDENTITY_UNAVAILABLE'); }
     const { wall, mono } = this.validClock();
     this.store.run('INSERT INTO pending_space_sync VALUES(?,?,?,?,?,?,?,0)', space.space_id, space.authority_key, requestId, bytes, wall, mono, retryImmediately ? mono : mono + 1000);
-    this.store.run("UPDATE authority_spaces SET sync_state=CASE WHEN sync_state='DENIED' THEN 'DENIED' ELSE 'SYNCING' END,next_refresh_wall_ms=NULL WHERE space_id=?", space.space_id);
+    this.store.run("UPDATE authority_spaces SET sync_state=CASE WHEN sync_state IN ('DENIED','EXPIRED') THEN sync_state ELSE 'SYNCING' END,next_refresh_wall_ms=NULL WHERE space_id=?", space.space_id);
     this.recordWall(wall); this.emitSpace(space.space_id, space.policy_epoch);
     return { peerKey: space.authority_key, bytes, requestId };
   }
