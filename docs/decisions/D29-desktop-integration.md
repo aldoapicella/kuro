@@ -1,5 +1,9 @@
 # D29: desktop integration checkpoint
 
+The initial checkpoint below is retained as validation history. [D30](D30-native-lifecycle-barrier.md)
+supersedes its initially closed clock composition on the specifically qualified macOS build,
+adds native lifecycle recovery and records the separate physical wake validation status.
+
 The desktop adds strict AppPort reply schemas and a separate DesktopHostPort for native
 text selection, verified pairing selection, display-only host information and explicitly
 simulated scenarios. Existing AppPort commands, wire v1 and AiPort are unchanged. No host

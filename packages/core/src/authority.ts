@@ -50,6 +50,7 @@ const MAX_COUNTER = Number.MAX_SAFE_INTEGER;
 
 export class Authority {
   #clockEpochValid = false;
+  #lifecycleEpoch = 0n;
   #monotonicHighwater: number | null = null;
 
   constructor(private readonly store: Store, private readonly options: AuthorityOptions) {
@@ -69,9 +70,11 @@ export class Authority {
     });
   }
 
-  suspend(): void { this.#clockEpochValid = false; }
+  suspend(): void { this.#clockEpochValid = false; this.#lifecycleEpoch++; }
 
   resume(trusted: boolean): void {
+    this.#clockEpochValid = false;
+    this.#lifecycleEpoch++;
     this.#monotonicHighwater = null;
     const { wall } = this.validClock();
     this.store.transaction(() => {
@@ -210,7 +213,9 @@ export class Authority {
 
   async pairSpace(input: AppInput<'pairSpace'>): Promise<SpaceView> {
     const session = this.requireSession();
+    const lifecycleEpoch = this.#lifecycleEpoch;
     const binding = await this.options.pairing.consume(input.selectionId);
+    this.assertLifecycleEpoch(lifecycleEpoch);
     if (binding.kind !== 'authority') throw new KuroError('INVALID_INPUT');
     const clock = this.validClock();
     return this.write(() => {
@@ -226,7 +231,9 @@ export class Authority {
 
   async replaceAuthority(input: AppInput<'replaceAuthority'>): Promise<SpaceView> {
     const session = this.requireSession();
+    const lifecycleEpoch = this.#lifecycleEpoch;
     const binding = await this.options.pairing.consume(input.selectionId);
+    this.assertLifecycleEpoch(lifecycleEpoch);
     if (binding.kind !== 'authority') throw new KuroError('INVALID_INPUT');
     const clock = this.validClock();
     return this.write(() => {
@@ -266,7 +273,9 @@ export class Authority {
   }
 
   async enrollMember(input: AppInput<'enrollMember'>): Promise<SpaceView> {
+    const lifecycleEpoch = this.#lifecycleEpoch;
     const binding = await this.options.pairing.consume(input.selectionId);
+    this.assertLifecycleEpoch(lifecycleEpoch);
     if (binding.kind !== 'member' || binding.spaceId !== input.spaceId) throw new KuroError('INVALID_INPUT');
     this.validClock();
     return this.ownerMutation(input.spaceId, input.expectedRevision, () => {
@@ -308,7 +317,9 @@ export class Authority {
   }
 
   async pairPeer(input: AppInput<'pairPeer'>): Promise<null> {
+    const lifecycleEpoch = this.#lifecycleEpoch;
     const binding = await this.options.pairing.consume(input.selectionId);
+    this.assertLifecycleEpoch(lifecycleEpoch);
     if (binding.kind !== 'peer') throw new KuroError('INVALID_INPUT');
     const { wall } = this.validClock();
     this.write(() => {
@@ -746,9 +757,18 @@ export class Authority {
     const count = this.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM authority_spaces')?.count ?? 0;
     if (count >= CORE_LIMITS.maxSpaces) throw new KuroError('CAPACITY_EXCEEDED');
   }
+  checkClock(): void { this.validClock(); }
+  private assertLifecycleEpoch(epoch: bigint): void {
+    this.validClock();
+    if (epoch !== this.#lifecycleEpoch) throw new KuroError('CANCELLED');
+  }
   private validClock(): { wall: number; mono: number } {
-    const wall = this.options.clock.wallNowMs();
-    const mono = this.options.clock.monotonicNowMs();
+    let wall: number, mono: number;
+    try { wall = this.options.clock.wallNowMs(); mono = this.options.clock.monotonicNowMs(); }
+    catch {
+      this.markClockUncertain();
+      throw new KuroError('CLOCK_UNCERTAIN');
+    }
     if (!validTime(wall) || !validTime(mono) || (this.#monotonicHighwater != null && mono < this.#monotonicHighwater) || (validTime(wall) && this.detectRollback(wall))) {
       this.markClockUncertain();
       throw new KuroError('CLOCK_UNCERTAIN');
