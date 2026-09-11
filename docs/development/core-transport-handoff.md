@@ -2,7 +2,7 @@
 
 The TypeScript custody workflow is implemented with real local SQLite: authenticated admission, authorization before ranking, stored human review, atomic approval/outbox, exact-byte retries, durable inbox before ACK, and optional private summary manifests. Shared authority follows D25, including original-send leases and explicit namespace recovery. The transport uses the actual HyperDHT stack in a Node worker. The manual core harness deliberately uses simulated AI and transport.
 
-This is a module handoff. Standalone QVAC embedding/generation is now verified by the [AI harness](../../harnesses/ai/README.md). The complete host workflow with real QVAC, Electron composition, Bare/Pear packaging, and physical two-device offline-LAN operation remain separate integration gates. No simulation automatically substitutes for an unavailable real adapter.
+This is a module handoff. Standalone QVAC embedding/generation and the combined Node custody workflow with real QVAC, SQLite and HyperDHT are verified by the [AI harness](../../harnesses/ai/README.md) and [transport coordinator](../../harnesses/transport/README.md#combined-core-workflow-with-selectable-ai). Electron composition, Bare/Pear packaging, and physical two-device offline-LAN operation remain separate integration gates. No simulation automatically substitutes for an unavailable real adapter.
 
 ## Install and run
 
@@ -16,6 +16,9 @@ pnpm test
 pnpm probe:host
 pnpm test:reference
 pnpm --filter @kuro/transport-harness smoke
+pnpm --filter @kuro/ai probe:runtime
+pnpm --filter @kuro/transport-harness core-smoke
+KURO_VM_TEST_CONFIG='{"mode":"local","ai":"qvac"}' pnpm --filter @kuro/transport-harness core-smoke
 pnpm --filter @kuro/core-harness harness -- --state /tmp/kuro-core-demo
 ```
 
@@ -71,13 +74,15 @@ Local results on September 10, 2026:
 | Process-scoped local-only egress smoke | Passed with the same five-message exchange; an external TCP connection control returned `EPERM`. |
 | SQLite host probe | Node 24.19.0 / SQLite 3.53.3, FTS5, foreign keys and persistent reopen passed on macOS arm64 and both Ubuntu arm64 guests. |
 | Virtual custody workflow | Passed with the implementation incorporated in `4d59f7e`, using one Ubuntu VM using two isolated Linux network namespaces and a direct veth link. Separate peer processes/databases, output-default-drop gates and failed external TCP controls. |
+| Combined real QVAC custody workflow | Passed at `290c7cb` on macOS arm64 with two Node processes and on Ubuntu arm64 with two isolated network namespaces. Actual QVAC, HyperDHT and SQLite; no scripted inference. See D27 for run IDs and boundaries. |
+| Clean QVAC runtime installation | A fresh detached pnpm install loaded GTE on macOS after explicitly pinning `require-asset`; Linux worker heartbeat passed after installing `libatomic1`. CI runs the no-model worker probe. |
 | Two Lima guests over user-v2 | Not passed: clean runs timed out at initial authority synchronization or after requester relaunch. A synchronized direct UDP echo passed; these failures do not establish a generic UDP outage. |
 
 Initial validation exposed and corrected D25 parser round trips, lifecycle/expiry renewal races, interrupted-job state reconciliation, selected-file replacement boundaries, summary manifest rollback, and transport startup cancellation. Review additionally required atomic host secret creation and serialized stop/start. Extended testing exposed intermittent same-key reconnection delivery failures, also seen in hosted CI. The retained regressions now pass with the SDK connection pool and bounded encrypted-stream flush/reconnect handling. Fresh Linux/macOS push and pull-request CI passed on transport commit `29a93a4`; final hosted evidence is recorded on the implementation PR. The separate Lima user-v2 profile remains unsuccessful and must not be described as a two-VM pass. None of these results closes the external gates below.
 
 | Baseline | Observable evidence |
 | --- | --- |
-| B01 | Explicit simulated AI; no model call on receipt/read and unavailable generation preserves evidence. Real-model smoke evidence is recorded separately in [D27](../decisions/D27-qvac-adapter-integration.md); host composition remains pending. |
+| B01 | Simulated and actual-QVAC profiles both preserve evidence reading without AI and avoid generation on receipt. Real combined Node workflow evidence is recorded in [D27](../decisions/D27-qvac-adapter-integration.md); desktop composition remains pending. |
 | B02, B13 | `authority.test.ts`: missing predicates, membership/grant/capability intersection, manage versus owner, local ACL restrictions, verified pinning, namespace recovery. |
 | B03 | `workflow.test.ts`: restricted and cross-space sentinel text/vectors never enter the AI ranker, review or delivery. SQL predicates precede candidate materialization. |
 | B04 | `workflow.test.ts`, `crash.test.ts`: rollback/concurrent approval and SIGKILL before/after commit preserve atomic approval/dependencies/outbox. |
@@ -107,7 +112,7 @@ The Python reference suite is separate regression evidence; it does not prove th
 ## External gates and next checks
 
 1. **Electron host:** provide the selected Electron version/build. Run `scripts/probe-host.mjs` in that application's main-process runtime and record `process.versions`, SQLite, FTS5, foreign keys and disk reopen. Repeat the core lifecycle tests through the actual host suspend/resume barrier. Verify the OS secret adapter reports protected storage, rejects unavailable/Linux `basic_text`, and implements `createIfAbsent` atomically across processes with durable winning bytes. Terminal Node alone cannot close this gate.
-2. **QVAC application integration:** the conforming adapter and combined SQLite/sentinel/manifest test now exist in `packages/ai`. That integration test uses a scripted backend. Run the manual request → review → explicit approval → evidence → explicit summary sequence through the actual host and QVAC models. Keep evidence readable with the model unloaded. The independent real-model harness and its results are documented in [D27](../decisions/D27-qvac-adapter-integration.md).
+2. **QVAC application integration:** the automated Node coordinator now runs actual QVAC with two persistent cores and HyperDHT, including model-free evidence reads and explicit generated summary. The SQLite/sentinel/manifest unit integration separately uses a scripted backend. Repeat the manual request → review → explicit approval → evidence → explicit summary sequence through the selected desktop host; automated test approval does not validate the human interaction. Results are documented in [D27](../decisions/D27-qvac-adapter-integration.md).
 3. **Bare/Pear runtime:** select and provide the intended host/toolchain and worker bridge. Package the HyperDHT worker through that runtime's verified APIs, keep authenticated key/byte semantics and bounded lifecycle behavior, and run the shared transport conformance suite. The current worker imports Node worker threads and is not a Bare package.
 4. **Physical offline LAN:** provide a second configured device and control of the intended LAN's external egress. Use an isolated HyperDHT bootstrap plus a persistent routing node, explicit known peer keys, and no public bootstrap fallback. Start both peers fresh with WAN disconnected while allowing their LAN/bootstrap ports. Exchange `SPACE_STATE_REQUEST` and the correlated authenticated projection, run the core evidence flow, stop/restart the recipient with the same protected identity, and verify exact retry/one inbox effect. Record devices, runtime versions, bootstrap/router addresses, interface/firewall policy, and failed external-connection control. Repeat after disconnect/reconnect. The bootstrap/peer runner and command protocol are documented in the [transport harness](../../harnesses/transport/README.md).
 

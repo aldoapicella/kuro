@@ -8,12 +8,14 @@
     "./testing": "./src/testing/index.ts"
   },
   "scripts": {
-    "test": "vitest run test && node --import tsx --test test/core-integration.ts"
+    "test": "vitest run test && node --import tsx --test test/core-integration.ts",
+    "probe:runtime": "node test/runtime-smoke.mjs"
   },
   "dependencies": {
     "@kuro/contracts": "workspace:*",
     "@qvac/inference": "0.19.0",
-    "@qvac/sdk": "0.19.0"
+    "@qvac/sdk": "0.19.0",
+    "require-asset": "1.2.2"
   },
   "devDependencies": {
     "@kuro/core": "workspace:*",

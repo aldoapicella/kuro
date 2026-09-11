@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "harness": "node --import tsx src/main.ts" },
+  "scripts": {
+    "harness": "node --import tsx src/main.ts"
+  },
   "dependencies": {
     "@kuro/contracts": "workspace:*",
     "@kuro/core": "workspace:*",
-    "@kuro/transport": "workspace:*"
+    "@kuro/transport": "workspace:*",
+    "@kuro/ai": "workspace:*"
   }
 }
