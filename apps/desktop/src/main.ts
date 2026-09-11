@@ -26,12 +26,12 @@ const mode = argument('mode') ?? 'real';
 const profile = argument('profile') ?? 'A';
 // `--ai=qvac` runs real local models behind the simulated transport. Real mode is
 // always QVAC; demo mode is always scripted and never loads a model.
-const aiChoice = argument('ai') ?? 'simulated';
+const aiChoice = argument('ai') ?? (mode === 'real' ? 'qvac' : 'simulated');
 if (!['demo', 'core-simulated', 'real'].includes(mode) || !['A', 'B'].includes(profile)) throw new Error('Use --mode=demo|core-simulated|real and --profile=A|B');
 if (!['simulated', 'qvac'].includes(aiChoice)) throw new Error('Use --ai=simulated|qvac');
-if (aiChoice === 'qvac' && mode !== 'core-simulated') throw new Error('--ai=qvac applies to --mode=core-simulated; real mode already uses QVAC');
+if ((mode === 'real' && aiChoice !== 'qvac') || (mode === 'demo' && aiChoice !== 'simulated')) throw new Error('Real mode requires QVAC; demo mode requires simulated AI');
 app.setName('KURO');
-const dataDirectory = argument('user-data-dir') ? resolve(argument('user-data-dir')!) : join(app.getPath('appData'), 'KURO', mode, mode === 'core-simulated' ? 'AB' : profile);
+const dataDirectory = argument('user-data-dir') ? resolve(argument('user-data-dir')!) : join(app.getPath('appData'), 'KURO', mode, mode === 'core-simulated' ? (aiChoice === 'qvac' ? 'AB-qvac' : 'AB') : profile);
 app.setPath('userData', dataDirectory);
 const bindings = new Map<number, WindowBinding>();
 let stop = async (): Promise<void> => {};
@@ -263,14 +263,15 @@ else {
     } else if (mode === 'core-simulated') {
       const { createSimulatedDesktop } = await import('./composition/simulated.js');
       // One QVAC runtime serves both simulated devices: this is still one physical
-      // host with one model runtime, and its guard keeps jobs serialized.
+      // host with one model runtime. The simulation pump drains each core's
+      // active job before ticking the next; the adapter guard refuses overlap.
       // Loading this module is explicit; a failed SDK never falls back to a fake port.
       const ai = aiChoice === 'qvac' ? await import('@kuro/ai').then(({ createAiAdapter, QvacClient }) => createAiAdapter(new QvacClient())) : undefined;
       let runtime;
       try { runtime = await createSimulatedDesktop(dataDirectory, ai ? { createAi: () => ai.port } : {}); }
       catch (error) { await ai?.close().catch(() => {}); throw error; }
       const lifecycle = new DesktopLifecycle([...runtime.nodes.values()].map(node => node.core), () => ai?.close() ?? Promise.resolve(), undefined, invalidateViews);
-      stop = async () => { await runtime.close(); await ai?.close(); };
+      stop = () => runtime.close(() => lifecycle.close());
       suspend = () => lifecycle.suspend(); resume = () => lifecycle.resume();
       lock = () => lifecycle.lock(); unlock = () => lifecycle.unlock();
       timer = setInterval(() => { void runtime.pump().catch(suspendSafely); }, 500);

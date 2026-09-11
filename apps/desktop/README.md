@@ -53,6 +53,16 @@ pnpm desktop:real
 real inference or transport. `pnpm desktop:integrated` runs actual core and
 SQLite with simulated adapters.
 
+`pnpm desktop:qvac` is a development demonstration with actual local QVAC and
+an in-memory network. Its two synthetic identities, spaces, and permissions
+are prepared by the harness; it does not validate real onboarding or delivery.
+Both windows share one QVAC runtime, and the harness drains each core's active
+job before starting the next device's work. Its default `core-simulated/AB-qvac`
+data directory is separate from the scripted `core-simulated/AB` directory;
+do not reuse an explicit `--user-data-dir` across AI providers. Use
+`pnpm desktop:real` for the MVP's protected identity, explicit model preparation,
+permission administration, and actual Bare transport.
+
 ```sh
 pnpm desktop:build
 pnpm desktop:package

@@ -13,7 +13,7 @@ import { ModelAssets } from './model-assets.js';
 
 type Runtime = Awaited<ReturnType<typeof createRealDesktop>>;
 type Profile = { displayName: string; network: DesktopNetwork };
-const emptyInfo = (profile: 'A' | 'B'): DesktopInfo => ({ mode: 'real', profile, memberId: '0'.repeat(32), publicKey: '0'.repeat(64), scenario: null, peers: [], clockProtection: 'closed' });
+const emptyInfo = (profile: 'A' | 'B'): DesktopInfo => ({ mode: 'real', profile, memberId: '0'.repeat(32), publicKey: '0'.repeat(64), scenario: null, peers: [], clockProtection: 'closed', aiProvider: 'qvac' });
 
 /** Host composition and private settings only; all domain mutations stay on AppPort. */
 export class ProfileRuntime {
