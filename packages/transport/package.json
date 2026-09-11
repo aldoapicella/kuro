@@ -9,6 +9,11 @@
   },
   "dependencies": {
     "@kuro/contracts": "workspace:*",
-    "hyperdht": "6.34.0"
-  }
+    "hyperdht": "6.34.0",
+    "bare-runtime": "1.32.0",
+    "bare-pipe": "4.3.1",
+    "bare-buffer": "3.7.1",
+    "require-asset": "1.2.2"
+  },
+  "devDependencies": { "esbuild": "0.28.2" }
 }
