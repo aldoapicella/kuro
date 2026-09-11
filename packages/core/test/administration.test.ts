@@ -35,7 +35,7 @@ test('revoking one verified device changes shared policy without reviving approv
     const selection = w.owner.pairing.verify({ kind: 'member', spaceId: w.spaceId, memberId: w.requester.memberId, peerKey: extraKey, spaceAlias: 'd'.repeat(32) });
     let space = ok(await w.owner.core.app.getState({})).spaces.find(view => view.spaceId === w.spaceId)!;
     ok(await w.owner.core.app.enrollMember({ spaceId: w.spaceId, selectionId: selection, capabilities: ['search', 'read', 'share', 'receive', 'manage'], validUntilMs: null, expectedRevision: space.policyRevision }));
-    w.advance(6000); ok(await w.requester.core.app.refreshSpace({ spaceId: w.spaceId })); await w.pump();
+    w.advance(6000); ok(await w.requester.core.app.refreshSpace({ spaceId: w.spaceId })); w.advance(1000); await w.pump();
     const ownerDocument = await w.importDoc('Device revocation must cancel only future authorization.');
     const ownerRules = ok(await w.owner.core.app.getDocumentRules({ spaceId: w.spaceId, documentId: ownerDocument.documentId }));
     assert.equal(ownerRules.rules.find(rule => rule.memberId === w.requester.memberId)!.actions.length, 1);
@@ -53,12 +53,54 @@ test('revoking one verified device changes shared policy without reviving approv
     const administration = ok(await w.owner.core.app.getSpaceAdministration({ spaceId: w.spaceId }));
     if (administration.scope !== 'owner') throw new Error('unreachable');
     assert.equal(administration.members.find(member => member.memberId === w.requester.memberId)!.devices.find(device => device.publicKey === extraKey)!.revoked, true);
+    const rejectedAuthorityKey = await w.owner.core.app.revokeDevice({ spaceId: w.spaceId, publicKey: w.owner.key, expectedRevision: ok(await w.owner.core.app.getState({})).spaces.find(view => view.spaceId === w.spaceId)!.policyRevision });
+    assert.equal(rejectedAuthorityKey.ok, false); if (rejectedAuthorityKey.ok) throw new Error('unreachable'); assert.equal(rejectedAuthorityKey.error.code, 'ACCESS_DENIED');
+    assert.equal(ok(await w.owner.core.app.getSpaceAdministration({ spaceId: w.spaceId })).scope, 'owner');
+    const afterRejectedAuthority = ok(await w.owner.core.app.getSpaceAdministration({ spaceId: w.spaceId }));
+    if (afterRejectedAuthority.scope !== 'owner') throw new Error('unreachable');
+    assert.equal(afterRejectedAuthority.members.find(member => member.memberId === w.owner.memberId)!.devices.find(device => device.publicKey === w.owner.key)!.revoked, false);
 
-    w.advance(6000); ok(await w.requester.core.app.refreshSpace({ spaceId: w.spaceId })); await w.pump();
+    w.advance(6000); ok(await w.requester.core.app.refreshSpace({ spaceId: w.spaceId })); w.advance(1000); await w.pump();
     const projection = ok(await w.requester.core.app.getSpaceAdministration({ spaceId: w.spaceId }));
     if (projection.scope !== 'recipient-projection') throw new Error('unreachable');
     assert.equal(projection.members.find(member => member.memberId === w.requester.memberId)!.deviceKeys.includes(extraKey), false);
     assert.equal(projection.members.find(member => member.memberId === w.requester.memberId)!.deviceKeys.includes(w.requester.key), true);
+  } finally { await w.close(); }
+});
+
+test('recipient projection is metadata-only but still rejects stale leases and untrusted clocks', async () => {
+  const w = await makeWorld();
+  try {
+    let ownerState = ok(await w.owner.core.app.getState({})).spaces.find(view => view.spaceId === w.spaceId)!;
+    ok(await w.owner.core.app.setMember({ spaceId: w.spaceId, memberId: w.requester.memberId, active: true, capabilities: ['search'], validUntilMs: null, expectedRevision: ownerState.policyRevision }));
+    const authority = ok(await w.owner.core.app.getSpaceAdministration({ spaceId: w.spaceId }));
+    if (authority.scope !== 'owner') throw new Error('unreachable');
+    assert.deepEqual(authority.members.find(member => member.memberId === w.requester.memberId)!.capabilities, ['search']);
+    const requesterState = ok(await w.requester.core.app.getState({})).spaces.find(view => view.spaceId === w.spaceId)!;
+    ok(await w.requester.core.app.setLocalPolicy({ spaceId: w.spaceId, memberId: w.requester.memberId, admitted: true, actions: ['search'], validUntilMs: null, expectedRevision: requesterState.policyEpoch }));
+    w.advance(6000); ok(await w.requester.core.app.refreshSpace({ spaceId: w.spaceId })); await w.pump();
+    const projection = ok(await w.requester.core.app.getSpaceAdministration({ spaceId: w.spaceId }));
+    assert.equal(projection.scope, 'recipient-projection');
+
+    w.network.setFaults({ disconnect: true }); w.advance(900000);
+    assert.deepEqual(await w.requester.core.app.getSpaceAdministration({ spaceId: w.spaceId }), { ok: false, error: { code: 'EXPIRED', retryable: false } });
+    w.requester.core.suspend();
+    assert.deepEqual(await w.requester.core.app.getSpaceAdministration({ spaceId: w.spaceId }), { ok: false, error: { code: 'CLOCK_UNCERTAIN', retryable: true } });
+  } finally { await w.close(); }
+});
+
+test('document-rule reads retain distinct expiry groups for one member', async () => {
+  const w = await makeWorld();
+  try {
+    const early = w.owner.clock.wallNowMs() + 10000, late = early + 10000;
+    const document = ok(await w.owner.core.app.importText({ spaceId: w.spaceId, selectionId: w.owner.files.add('Rule expiry grouping source.'), replaceDocumentId: null, expectedRevision: null, rules: [
+      { memberId: w.owner.memberId, actions: ['search', 'read', 'share', 'receive', 'manage'], validUntilMs: null },
+      { memberId: w.requester.memberId, actions: ['search'], validUntilMs: early },
+      { memberId: w.requester.memberId, actions: ['read'], validUntilMs: late },
+    ] }));
+    await w.pump();
+    const rules = ok(await w.owner.core.app.getDocumentRules({ spaceId: w.spaceId, documentId: document.documentId })).rules.filter(rule => rule.memberId === w.requester.memberId);
+    assert.deepEqual(rules, [{ memberId: w.requester.memberId, actions: ['read'], validUntilMs: late }, { memberId: w.requester.memberId, actions: ['search'], validUntilMs: early }]);
   } finally { await w.close(); }
 });
 

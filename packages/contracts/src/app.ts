@@ -24,7 +24,7 @@ const DeviceAdministrationSchema = z.strictObject({ publicKey: KeySchema, spaceA
 const MemberAdministrationSchema = z.strictObject({ memberId: IDSchema, active: z.boolean(), capabilities, validUntilMs: validity, devices: z.array(DeviceAdministrationSchema).max(4) });
 const RelationshipAdministrationSchema = z.strictObject({ memberId: IDSchema, otherMemberId: IDSchema, allowed: z.boolean(), validUntilMs: validity });
 const ProjectionMemberSchema = z.strictObject({ memberId: IDSchema, capabilities, deviceKeys: z.array(KeySchema).min(1).max(4) });
-/** Fails CLOCK_UNCERTAIN without a trusted lifecycle clock; recipient reads also fail EXPIRED when their projection lease is stale. */
+/** Fails CLOCK_UNCERTAIN without a trusted lifecycle clock; recipient reads require the bound local session in a current projection and fail EXPIRED when its lease is stale. */
 export const SpaceAdministrationSchema = z.discriminatedUnion('scope', [
   z.strictObject({ space: SpaceViewSchema, scope: z.literal('owner'), tombstoned: z.boolean(), members: z.array(MemberAdministrationSchema).max(16), relationships: z.array(RelationshipAdministrationSchema).max(120) }),
   z.strictObject({ space: SpaceViewSchema, scope: z.literal('recipient-projection'), members: z.array(ProjectionMemberSchema).max(16) }),

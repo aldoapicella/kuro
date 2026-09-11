@@ -223,6 +223,9 @@ export class Authority {
       this.assertSpaceCapacity();
       this.store.run(`INSERT INTO authority_spaces(space_id,authority_key,owner_member_id,local_authority_member_id,local_alias,is_owner,policy_revision,policy_epoch,corpus_revision,index_generation,sync_state,cache_stale,next_refresh_wall_ms,sync_backoff_ms)
         VALUES(?,?,?,?,?,0,1,1,0,0,'STALE',1,?,1000)`, binding.spaceId, binding.authorityKey, null, session.memberId, binding.spaceAlias, clock.wall);
+      // The already verified authority tuple is sufficient to route control and
+      // evidence frames to that pinned peer. It is not a shared membership grant.
+      this.store.run('INSERT INTO local_peer_aliases VALUES(?,?,?)', binding.spaceId, binding.authorityKey, binding.spaceAlias);
       this.store.run('INSERT INTO local_policy VALUES(?,?,1,?,NULL)', binding.spaceId, session.memberId, jsonCaps(input.localActions));
       this.recordWall(clock.wall); this.emitSpace(binding.spaceId, 1);
       return this.getSpace(binding.spaceId);
@@ -318,6 +321,7 @@ export class Authority {
 
   revokeDevice(input: AppInput<'revokeDevice'>): SpaceView {
     return this.ownerMutation(input.spaceId, input.expectedRevision, () => {
+      if (input.publicKey === this.space(input.spaceId).authority_key) throw new KuroError('ACCESS_DENIED');
       const binding = this.store.get<BindingRow>('SELECT * FROM authority_bindings WHERE space_id=? AND peer_key=?', input.spaceId, input.publicKey);
       if (!binding) throw new KuroError('INVALID_INPUT');
       if (binding.denial_only) return false;
@@ -338,7 +342,10 @@ export class Authority {
       const relationships = this.store.all<{ member_a: string; member_b: string; allowed: number; valid_until_ms: number | null }>('SELECT member_a,member_b,allowed,valid_until_ms FROM authority_relationships WHERE space_id=? ORDER BY member_a,member_b', spaceId).map(row => ({ memberId: row.member_a, otherMemberId: row.member_b, allowed: Boolean(row.allowed), validUntilMs: row.valid_until_ms }));
       return { space: this.view(space), scope: 'owner', tombstoned: Boolean(space.tombstoned), members, relationships };
     }
-    this.authorizeLocal(spaceId, 'manage');
+    const session = this.requireSession();
+    // Shared metadata is a recipient-scoped cache, not a content or administration grant.
+    // The bound local session and current lease remain mandatory.
+    this.assertMemberActive(spaceId, session.memberId, this.options.publicKey);
     return { space: this.getSpace(spaceId), scope: 'recipient-projection', members: this.store.all<{ member_id: string; capabilities: string }>('SELECT member_id,capabilities FROM cached_members WHERE space_id=? ORDER BY member_id', spaceId).map(member => ({ memberId: member.member_id, capabilities: parseCaps(member.capabilities), deviceKeys: this.store.all<{ peer_key: string }>('SELECT peer_key FROM cached_member_keys WHERE space_id=? AND member_id=? ORDER BY peer_key', spaceId, member.member_id).map(key => key.peer_key) })) };
   }
 
@@ -358,7 +365,11 @@ export class Authority {
       ? this.store.all<{ member_id: string; action: Capability; valid_until_ms: number | null }>(`SELECT da.member_id,da.action,da.valid_until_ms FROM document_acl da JOIN authority_members am ON am.space_id=da.space_id AND am.member_id=da.member_id WHERE da.space_id=? AND da.document_id=? AND am.active=1 AND (am.valid_until_ms IS NULL OR am.valid_until_ms>?) AND EXISTS(SELECT 1 FROM authority_bindings ab WHERE ab.space_id=am.space_id AND ab.member_id=am.member_id AND ab.denial_only=0) ORDER BY da.member_id,da.action`, spaceId, documentId, this.validClock().wall)
       : this.store.all<{ member_id: string; action: Capability; valid_until_ms: number | null }>(`SELECT da.member_id,da.action,da.valid_until_ms FROM document_acl da JOIN cached_members cm ON cm.space_id=da.space_id AND cm.member_id=da.member_id WHERE da.space_id=? AND da.document_id=? AND EXISTS(SELECT 1 FROM cached_member_keys ck WHERE ck.space_id=cm.space_id AND ck.member_id=cm.member_id) ORDER BY da.member_id,da.action`, spaceId, documentId);
     const grouped = new Map<string, { memberId: string; actions: Capability[]; validUntilMs: number | null }>();
-    for (const row of rows) { const rule = grouped.get(row.member_id) ?? { memberId: row.member_id, actions: [], validUntilMs: row.valid_until_ms }; rule.actions.push(row.action); grouped.set(row.member_id, rule); }
+    for (const row of rows) {
+      const key = `${row.member_id}:${row.valid_until_ms ?? 'none'}`;
+      const rule = grouped.get(key) ?? { memberId: row.member_id, actions: [], validUntilMs: row.valid_until_ms };
+      rule.actions.push(row.action); grouped.set(key, rule);
+    }
     return { spaceId, documentId, revision, rules: [...grouped.values()] };
   }
 

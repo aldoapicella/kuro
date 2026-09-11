@@ -22,6 +22,8 @@ document revision. No screen may substitute one counter for another.
 `revokeDevice` removes one linked key from future authorization while retaining its
 denial binding. It uses the same atomic shared-policy invalidation as member
 revocation. Other device keys belonging to the member remain separately eligible.
+The pinned authority key is a separate trust root and cannot be revoked with this
+command; changing it requires the explicit authority-replacement recovery flow.
 
 Clock uncertainty rejects these administration reads. Recipient projections and
 custodian-local permission reads additionally need a current shared lease; cached
@@ -45,6 +47,13 @@ and keys from the bound runtime and uses native file selection. Imports continue
 use single-use `VerifiedPairingPort` tokens after explicit comparison of the entire
 binding tuple over a separate trusted channel. Enrollment and local grants remain
 subsequent independent AppPort actions.
+
+Consuming an authority pairing tuple also records its pinned `(authorityKey,
+spaceAlias)` as the local peer route. This permits a newly paired profile to send
+control or evidence frames to the verified authority without a second synthetic peer
+selection. It creates no membership, capability, local grant, or usable cache: every
+operation still needs a current authority projection and the normal local/document
+authorization checks.
 
 A linked device must share its operator's logical member ID while keeping its own
 protected transport seed. The desktop surface therefore includes native export and
