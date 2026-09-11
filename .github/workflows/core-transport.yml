@@ -44,9 +44,9 @@ jobs:
           pnpm test:reference
           pnpm --filter @kuro/transport-harness smoke
           pnpm --filter @kuro/transport-harness core-smoke
-      - name: Verify macOS native packaging helpers
+      - name: Verify macOS native packaging and trusted-runner guards
         if: runner.os == 'macOS'
-        run: node --test apps/desktop/test/macos-native-deps.test.mjs
+        run: node --test apps/desktop/test/macos-native-deps.test.mjs scripts/release-runner-guard.test.mjs
       - name: Verify release metadata and qualification gates
         run: node --test scripts/release-validate.test.mjs
       - name: Build and package without source manifest mutation

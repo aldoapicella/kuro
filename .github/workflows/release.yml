@@ -27,6 +27,9 @@ jobs:
   qualify:
     if: github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner
     runs-on: [self-hosted, kuro-qualified-macos-arm64]
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

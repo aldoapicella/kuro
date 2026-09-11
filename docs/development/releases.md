@@ -35,6 +35,67 @@ for the isolated virtual-LAN qualification. Do not commit this configuration,
 model files, or its setup data. The qualifier rejects relative paths and records
 only bounded evidence outputs under `build/release-evidence/`.
 
+## Qualified runner lifecycle
+
+Prepare the runner once with `node scripts/release-runner-install.mjs`. The
+installer downloads the official `actions/runner` 2.337.0 macOS arm64 archive,
+verifies its published SHA-256
+`5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2`, and
+installs it under the private
+`~/.local/share/kuro-validation/actions-runner` directory. This does not
+register or start a runner. The upstream runner is MIT licensed; its source and
+release checksums are published at <https://github.com/actions/runner>.
+GitHub's current self-hosted runner guidance is at
+<https://docs.github.com/en/actions/reference/runners/self-hosted-runners>;
+the administrator hook contract is documented at
+<https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/run-scripts>.
+
+After the final source is the exact `main` tip, its required CI has passed, and
+the owner has queued the Release workflow on `main`, start the one-job listener:
+
+```sh
+node scripts/release-runner-start.mjs \
+  --source-sha 0123456789abcdef0123456789abcdef01234567 \
+  --version 0.1.0-preview.1 \
+  --config /absolute/private/path/release-config.json
+```
+
+The launcher requires GitHub CLI authentication as `aldoapicella`, checks the
+source against the current GitHub `main` tip, and requests a short-lived runner
+registration token without printing or writing it. It passes the token through
+the runner's masked `ACTIONS_RUNNER_INPUT_TOKEN` process environment, registers
+with `--ephemeral --disableupdate`, runs in the foreground for one job, and then
+confirms through the authenticated runner-list API that GitHub removed the
+ephemeral registration. If it remains, the launcher deletes only its randomized
+runner name and confirms absence before removing local state. Never run it as a
+service or leave it waiting for later work. The launcher also removes its
+one-job work directory and local credentials. If cleanup cannot confirm
+deregistration, remove the offline runner in the repository Actions settings
+before any retry.
+
+The administrator job-start hook is installed outside every checkout and reads
+only its sibling mode-0600 policy. It permits the `qualify` job only when the
+event is `workflow_dispatch`, the repository and actor are `aldoapicella/kuro`
+and `aldoapicella`, the workflow reference is exactly
+`.github/workflows/release.yml@refs/heads/main`, the workflow and source SHA are
+the expected main tip, and the version, macOS arm64 runner identity, and private
+release configuration path, size, and digest match. A pull request or other
+workflow that requests the known label therefore fails before any workflow,
+pre-action, or container step executes. A failed hook alone is insufficient
+because a workflow step can declare `if: always()`; on denial the installed
+hook terminates its parent Runner.Worker so no later condition is evaluated.
+GitHub's runner downloads referenced action packages while preparing a job
+before invoking the hook, so an unauthorized queued job can consume the
+ephemeral runner and cause download and work-directory activity until launcher
+cleanup; it cannot execute the downloaded action.
+Queue a fresh exact dispatch and start a newly registered ephemeral runner after
+such a denial.
+
+Run `node scripts/release-runner-guard.test.mjs` after changing the policy or
+hook. The test covers the exact allow case, PR/workflow/actor/ref/SHA/version and
+configuration-path denials, same-length configuration replacement, and private
+file modes.
+
 For this first preview, `clean-relocation-upgrade` proves persistent-schema
 preservation and reopen across candidate replacement. Its evidence must state
 that no earlier supported KURO release exists; it does not claim a migration.
