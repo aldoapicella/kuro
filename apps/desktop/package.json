@@ -1,0 +1,23 @@
+{
+  "name": "@kuro/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "../../dist/apps/desktop/src/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/launch.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "@kuro/contracts": "workspace:*",
+    "@kuro/core": "workspace:*",
+    "@kuro/ai": "workspace:*",
+    "@kuro/transport": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "esbuild": "0.28.2",
+    "@electron/packager": "20.3.0"
+  }
+}
