@@ -31,7 +31,7 @@ test('unconfigured real profiles provide valid startup metadata without opening 
       assert.equal(info.clockProtection, 'closed');
       assert.deepEqual(info.peers, []);
       assert.equal(runtime.running, false);
-      await runtime.stop();
+      await runtime.close();
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
