@@ -12,29 +12,67 @@ const ALL: Capability[] = ['search', 'read', 'share', 'receive', 'manage'];
 const OWNER = '1'.repeat(32); const REQUESTER = '2'.repeat(32); const alias = 'c'.repeat(32);
 type VmConfig = { mode: 'local' | 'ssh'; ai: 'simulated' | 'qvac'; bootstrapHost: string; sshConfig?: string; sshHost?: string; guestRepository?: string; guestStateRoot?: string; hostStateRoot?: string; guestPort?: number };
 type PeerOutput = { provider?: string; rankCandidateIds?: string[]; aiAvailable?: boolean; type?: string; requestId?: string; publicKey?: string; result?: Result<unknown>; selectionId?: string; diagnostics?: { records: Array<{ direction: string; type: string; digest: string }>; droppedAcks: number; lifecycle: string[] }; stopped?: boolean; aiCalls?: string[]; error?: string };
+type ExitOutcome = { code: number | null; signal: NodeJS.Signals | null } | { error: Error };
 
 class Peer {
   #child: ChildProcess; #events: PeerOutput[] = [];
   #waiters = new Map<string, { resolve(event: PeerOutput): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
-  #failure: Error | null = null; readonly #exit: Promise<void>;
+  #failure: Error | null = null; #stopRequested = false; #exitOutcome: ExitOutcome | null = null; readonly #exit: Promise<void>;
   constructor(start: () => ChildProcess, readonly label: string) {
     this.#child = start();
     this.#exit = new Promise(resolve => {
-      this.#child.once('exit', (code, signal) => { this.fail(new Error(`${label} exited (${code ?? signal})`)); resolve(); });
-      this.#child.once('error', error => { this.fail(error); resolve(); });
+      this.#child.once('exit', (code, signal) => {
+        this.#exitOutcome = { code, signal };
+      });
+      this.#child.once('close', (code, signal) => {
+        if (this.#exitOutcome === null) this.#exitOutcome = { code, signal };
+        const outcome = this.#exitOutcome;
+        const error = new Error(`${label} exited (${'error' in outcome ? outcome.error.message : outcome.code ?? outcome.signal})`);
+        this.rejectWaiters(error);
+        if (!this.#stopRequested) this.fail(error);
+        resolve();
+      });
+      this.#child.once('error', error => { this.#exitOutcome = { error }; this.fail(error); resolve(); });
     });
-    this.#child.stdin!.on('error', error => this.fail(error)); this.listen();
+    this.#child.stdin!.on('error', error => { if (this.#stopRequested) this.rejectWaiters(error); else this.fail(error); }); this.listen();
   }
   private listen(): void {
     createInterface({ input: this.#child.stdout! }).on('line', line => { try { this.receive(JSON.parse(line) as PeerOutput); } catch { /* endpoint only emits JSON */ } });
     this.#child.stderr!.on('data', data => process.stderr.write(`[${this.label}] ${data}`));
   }
-  private fail(error: Error): void { this.#failure = error; for (const waiter of this.#waiters.values()) { clearTimeout(waiter.timer); waiter.reject(error); } this.#waiters.clear(); }
+  private rejectWaiters(error: Error): void { for (const waiter of this.#waiters.values()) { clearTimeout(waiter.timer); waiter.reject(error); } this.#waiters.clear(); }
+  private fail(error: Error): void { this.#failure = error; this.rejectWaiters(error); }
   private receive(event: PeerOutput): void { const key = event.requestId ?? event.type ?? ''; const waiter = this.#waiters.get(key); if (waiter) { clearTimeout(waiter.timer); this.#waiters.delete(key); waiter.resolve(event); } else { this.#events.push(event); if (this.#events.length > 64) this.#events.shift(); } }
   wait(key: string, timeout = 20_000): Promise<PeerOutput> { const i = this.#events.findIndex(e => (e.requestId ?? e.type) === key); if (i >= 0) return Promise.resolve(this.#events.splice(i, 1)[0]!); if (this.#failure) return Promise.reject(this.#failure); return new Promise((resolve, reject) => { const timer = setTimeout(() => { this.#waiters.delete(key); reject(new Error(`${this.label} timed out waiting for ${key}`)); }, timeout); this.#waiters.set(key, {resolve,reject,timer}); }); }
   async ready(expectedProvider: string): Promise<string> { const event = await this.wait('ready'); if (event.provider !== expectedProvider) throw new Error(`${this.label} selected the wrong AI provider`); if (!event.publicKey) throw new Error(`${this.label} has no public key`); return event.publicKey; }
   async command(value: object): Promise<PeerOutput> { const requestId = (value as { requestId: string }).requestId; this.#child.stdin!.write(`${JSON.stringify(value)}\n`); const event = await this.wait(requestId); if (event.error) throw new Error(`${this.label}: ${event.error}`); return event; }
-  async stop(): Promise<void> { if (this.#child.exitCode !== null || this.#child.signalCode !== null) return; const force = setTimeout(() => this.#child.kill('SIGKILL'), 5_000); try { await this.command({ requestId: `stop-${randomUUID()}`, action: 'stop' }); } catch { this.#child.kill(); } finally { await this.#exit; clearTimeout(force); } }
+  async stop(): Promise<void> {
+    if (this.#child.exitCode !== null || this.#child.signalCode !== null) {
+      await this.#exit;
+      throw this.#failure ?? new Error(`${this.label} exited before acknowledged stop`);
+    }
+    this.#stopRequested = true;
+    let commandFailure: Error | null = null;
+    let forced = false;
+    const force = setTimeout(() => { forced = true; this.#child.kill('SIGKILL'); }, 5_000);
+    try {
+      const response = await this.command({ requestId: `stop-${randomUUID()}`, action: 'stop' });
+      if (response.stopped !== true) throw new Error(`${this.label} did not acknowledge stop`);
+      this.#child.stdin!.end();
+    } catch (error) {
+      commandFailure = error instanceof Error ? error : new Error(`${this.label} stop failed`);
+      this.#child.kill('SIGTERM');
+    } finally {
+      await this.#exit;
+      clearTimeout(force);
+    }
+    if (commandFailure) throw commandFailure;
+    if (forced) throw new Error(`${this.label} required SIGKILL during stop`);
+    if (this.#failure) throw this.#failure;
+    const outcome = this.#exitOutcome;
+    if (outcome === null || 'error' in outcome) throw outcome?.error ?? new Error(`${this.label} exited without a result`);
+    if (outcome.code !== 0 || outcome.signal !== null) throw new Error(`${this.label} did not exit cleanly (${outcome.code ?? outcome.signal})`);
+  }
 }
 
 function config(): VmConfig {
@@ -76,6 +114,8 @@ async function main(): Promise<void> {
     while (Date.now() < deadline) { const value = await probe(); if (accept(value)) return value; await pump(1); }
     throw new Error(`Timed out waiting for ${label}`);
   };
+  let completed: Record<string, unknown> | null = null;
+  let workflowFailure: unknown = null;
   try {
     const [actualOwnerKey, actualRequesterKey] = await Promise.all([host.ready(provider), guest.ready(provider)]); if (actualOwnerKey !== ownerKey || actualRequesterKey !== requesterKey) throw new Error('seed-derived identity mismatch');
     const initial = await app(host, 'createSpace', { capabilities: ALL, localActions: ALL }); const spaceId = initial.spaceId;
@@ -123,12 +163,18 @@ async function main(): Promise<void> {
     await app(guest, 'submitQuestion', { spaceId, custodianKey: ownerKey, query: 'What observations remain now?', ttlSeconds: 3600 }); await pump(); reviews = await until(() => app(host, 'listReviews', { spaceId }), views => views.length === 1, 'second authorized review', 150_000); const secondReview = reviews[0]!; const second = await app(host, 'approveDraft', { draftId: secondReview.draftId, expectedRevision: secondReview.revision, reviewedViewDigest: secondReview.viewDigest }); const before = (await diagnostics(host)).records.filter(r => r.direction === 'out' && r.type === 'APPROVED_RESPONSE').length;
     ownerView = space(await app(host, 'getState', {}), spaceId); await app(host, 'setLocalPolicy', { spaceId, memberId: REQUESTER, admitted: false, actions: [], validUntilMs: null, expectedRevision: ownerView.policyEpoch }); await pump(); const after = (await diagnostics(host)).records.filter(r => r.direction === 'out' && r.type === 'APPROVED_RESPONSE').length; if (after !== before) throw new Error(`revoked response ${second.responseId} dispatched`);
     ownerView = space(await app(host, 'getState', {}), spaceId); await app(host, 'setMember', { spaceId, memberId: REQUESTER, active: false, capabilities: [], validUntilMs: null, expectedRevision: ownerView.policyRevision }); await sleep(5500); await app(guest, 'refreshSpace', { spaceId }); await until(() => app(guest, 'getState', {}), state => space(state, spaceId).syncState === 'DENIED', 'durable denial projection');
-    output({ phase: 'complete', run, provider, networkMode: vm.mode, stateDirectories: { host: hostState, guest: guestConfig.stateDirectory }, banner: `AUTOMATED SYNTHETIC TEST: ${provider}; explicit automated approval commands and test identities. ${vm.mode === 'local' ? 'Two local processes, not physical-device validation.' : 'Remote peer networking; physical or virtual scope depends on the supplied host.'}` });
+    completed = { phase: 'complete', run, provider, networkMode: vm.mode, stateDirectories: { host: hostState, guest: guestConfig.stateDirectory }, banner: `AUTOMATED SYNTHETIC TEST: ${provider}; explicit automated approval commands and test identities. ${vm.mode === 'local' ? 'Two local processes, not physical-device validation.' : 'Remote peer networking; physical or virtual scope depends on the supplied host.'}` };
   } catch (error) {
+    workflowFailure = error;
     const details = await Promise.allSettled([diagnostics(host), diagnostics(guest)]);
     output({ phase: 'failure-diagnostics', diagnostics: details.map(item => item.status === 'fulfilled' ? item.value : { unavailable: true }) });
-    throw error;
-  } finally { await Promise.allSettled([host.stop(), guest.stop()]); await router.destroy(); await bootstrapper.destroy(); }
+  }
+  const cleanup = await Promise.allSettled([host.stop(), guest.stop()]);
+  cleanup.push(...await Promise.allSettled([router.destroy(), bootstrapper.destroy()]));
+  if (workflowFailure !== null) throw workflowFailure;
+  const cleanupFailure = cleanup.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (cleanupFailure) throw cleanupFailure.reason;
+  output(completed!);
 }
 function space(state: StateView, id: string) { const value = state.spaces.find(item => item.spaceId === id); if (!value) throw new Error('missing space'); return value; }
 function output(value: unknown): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
