@@ -3,6 +3,23 @@
 Local AI and peer-to-peer collaboration for confidential knowledge.
 
 KURO lets participants query information held by trusted peers while each custodian retains control of their original documents. A custodian retrieves relevant passages locally with QVAC, reviews the proposed disclosure, and sends only approved evidence. The recipient can read that evidence and optionally summarize it on their own device.
+## Why this matters
+
+Participants working on the same question often each hold part of the answer,
+and no way to combine them. Each archive carries its own obligations (professional privilege, personal data, contractual confidentiality) so there is
+no repository both sides can accept, and no third party neutral enough to host
+one. The practical choices collapse to extremes: copy an archive to someone who
+should not hold it, or share nothing and lose the connection.
+
+KURO addresses the middle. The question travels instead of the corpus.
+Retrieval runs on the custodian's own device, a person reads the exact passages
+before anything is sent, and only those passages leave. Received evidence names
+its origin, document, version and byte range, so a claim can be traced back to
+the text it came from. Nothing is uploaded to a shared index, and no inference
+runs off-device.
+
+This matters where the custody requirement is real. Where it is not, a private
+centralized server remains a legitimate and simpler alternative.
 
 ## Project status
 
