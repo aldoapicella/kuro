@@ -1,9 +1,9 @@
-name: Core and transport
+name: Core, transport and AI
 on:
   push:
-    paths: ['packages/contracts/**', 'packages/core/**', 'packages/transport/**', 'harnesses/**', 'fixtures/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', '.github/workflows/core-transport.yml']
+    paths: ['packages/contracts/**', 'packages/core/**', 'packages/transport/**', 'packages/ai/**', 'harnesses/**', 'fixtures/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', '.github/workflows/core-transport.yml']
   pull_request:
-    paths: ['packages/contracts/**', 'packages/core/**', 'packages/transport/**', 'harnesses/**', 'fixtures/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', '.github/workflows/core-transport.yml']
+    paths: ['packages/contracts/**', 'packages/core/**', 'packages/transport/**', 'packages/ai/**', 'harnesses/**', 'fixtures/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', '.github/workflows/core-transport.yml']
 permissions:
   contents: read
 jobs:
@@ -26,6 +26,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+      - run: pnpm --filter @kuro/ai-harness harness
       - run: pnpm probe:host
       - run: pnpm test:reference
       - run: pnpm --filter @kuro/transport-harness smoke
