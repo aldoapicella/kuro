@@ -50,6 +50,21 @@ OS-protected concurrent creation/reopen, actual cached GTE embedding, and five a
 Bare deliveries with recipient restart and clean shutdown. The [desktop README](../../apps/desktop/README.md)
 records validation scope. The existing contracts and root pnpm configuration remain intact.
 
+Two additional macOS main-process checks used temporary test applications under development
+Electron 44.3.0; they are distinct from the packaged-entrypoint probes. Actual QVAC generation
+loaded the distribution's public AI/native dependency tree and completed a cached
+QWEN3_1_7B_INST_Q4 synthetic answer (one valid claim, 730 context tokens) in 9.084 seconds,
+with download fallbacks disabled and clean worker/process exit. Four independent Electron
+processes also raced distinct synthetic 32-byte candidates through the actual safeStorage-backed
+host store. All returned one winner; a fifth fresh process reopened/decrypted the same record.
+The store retained one sealed file and no pending files; all temporary processes and files
+were removed. Neither check enabled the core authorization gate.
+
+Linux/macOS push and PR CI passed for `9c09912`, including the relocated packaged-host and
+Electron UI regressions. Linux CI configures the pinned Chromium sandbox helper with its
+required ownership/permissions rather than disabling sandboxing. PR #8 merged as `a0d371a`
+after the independently validated #5–#7 dependency stack.
+
 Real clock/lifecycle safety remains a release gate: startup and resume are initially untrusted
 (`resume(false)`) until a trustworthy synchronous barrier is shown. A dedicated user-space
 IORegisterForSystemPower callback is insufficient: macOS can proceed with forced sleep after
