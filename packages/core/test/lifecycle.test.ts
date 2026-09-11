@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeWire } from '@kuro/contracts';
+import { decodeWire, encodeWire } from '@kuro/contracts';
 import { ALL,makeWorld,ok } from './world.js';
 
 test('changed reviewed source cannot be approved and immutable old snapshot remains local',async()=>{
@@ -37,6 +37,122 @@ test('authority outage permits cached local operations only until the original l
     w.advance(1);assert.deepEqual(await w.requester.core.app.getEvidence({responseId:approved.responseId}),{ok:false,error:{code:'EXPIRED',retryable:false}});
     assert.equal(w.inspect('requester','SELECT count(*) n FROM inbox')[0]!.n,1);
     assert.equal(ok(await w.requester.core.app.getState({})).spaces[0]!.syncState,'EXPIRED');
+  }finally{await w.close();}
+});
+
+test('local policy cancellation ends an unsent question before dispatch and releases its identity quota',async()=>{
+  const w=await makeWorld();try{
+    const request=ok(await w.requester.core.app.submitQuestion({spaceId:w.spaceId,custodianKey:w.owner.key,query:'Outstanding observations?',ttlSeconds:3600}));
+    const space=ok(await w.requester.core.app.getState({})).spaces[0]!;
+    const denied=ok(await w.requester.core.app.setLocalPolicy({spaceId:w.spaceId,memberId:w.owner.memberId,admitted:false,actions:[],validUntilMs:null,expectedRevision:space.policyEpoch}));
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'CANCELLED');
+    ok(await w.requester.core.app.setLocalPolicy({spaceId:w.spaceId,memberId:w.owner.memberId,admitted:true,actions:ALL,validUntilMs:null,expectedRevision:denied.policyEpoch}));
+    await w.pump();
+    assert.equal(w.requester.transport.sent.some(frame=>decodeWire(frame.bytes).type==='SEARCH_REQUEST'),false);
+    const fresh=ok(await w.requester.core.app.submitQuestion({spaceId:w.spaceId,custodianKey:w.owner.key,query:'Fresh question?',ttlSeconds:3600}));
+    assert.notEqual(fresh.requestId,request.requestId);
+  }finally{await w.close();}
+});
+
+test('a policy expiry during outgoing authorization cannot dispatch the request it just cancelled',async()=>{
+  const w=await makeWorld();try{
+    const deadline=w.requester.clock.wallNowMs()+1000;
+    ok(await w.requester.core.app.importText({spaceId:w.spaceId,selectionId:w.requester.files.add('Unrelated local snapshot with expiring recipient access.'),replaceDocumentId:null,expectedRevision:null,rules:[
+      {memberId:w.requester.memberId,actions:ALL,validUntilMs:null},
+      {memberId:w.owner.memberId,actions:['receive'],validUntilMs:deadline},
+    ]}));await w.pump();
+    ok(await w.requester.core.app.submitQuestion({spaceId:w.spaceId,custodianKey:w.owner.key,query:'Outstanding observations?',ttlSeconds:3600}));
+    w.advance(999);
+    const session=w.requester.options.sessions;const current=session.current.bind(session);let crossed=false;
+    // The trusted session provider runs during send authorization. Time can cross a
+    // scheduled ACL boundary here after tick has selected the still-pending request.
+    session.current=()=>{if(!crossed){crossed=true;w.requester.clock.advance(1);}return current();};
+    await w.requester.core.tick();
+    assert.equal(crossed,true);
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'CANCELLED');
+    assert.equal(w.inspect('requester','SELECT attempts FROM requests')[0]!.attempts,0);
+    assert.equal(w.requester.transport.sent.some(frame=>decodeWire(frame.bytes).type==='SEARCH_REQUEST'),false);
+  }finally{await w.close();}
+});
+
+test('a policy expiry during receipt authorization cannot revive the request or acknowledge new evidence',async()=>{
+  const w=await makeWorld();try{
+    const deadline=w.requester.clock.wallNowMs()+1000;
+    ok(await w.requester.core.app.importText({spaceId:w.spaceId,selectionId:w.requester.files.add('Unrelated local snapshot with expiring recipient access.'),replaceDocumentId:null,expectedRevision:null,rules:[
+      {memberId:w.requester.memberId,actions:ALL,validUntilMs:null},
+      {memberId:w.owner.memberId,actions:['receive'],validUntilMs:deadline},
+    ]}));await w.pump();
+    await w.importDoc('Outstanding observations awaiting approved delivery.');const view=await w.review();
+    ok(await w.owner.core.app.approveDraft({draftId:view.draftId,expectedRevision:view.revision,reviewedViewDigest:view.viewDigest}));
+    const approvedBytes=Uint8Array.from(w.inspect('owner','SELECT bytes FROM approvals')[0]!.bytes as Uint8Array);
+    w.advance(999);
+    const session=w.requester.options.sessions;const current=session.current.bind(session);let crossed=false;
+    session.current=()=>{if(!crossed){crossed=true;w.requester.clock.advance(1);}return current();};
+    await w.owner.transport.send(w.requester.key,approvedBytes);w.network.flush();await w.requester.core.settled();
+    assert.equal(crossed,true);
+    assert.equal(w.inspect('requester','SELECT count(*) n FROM inbox')[0]!.n,0);
+    assert.equal(w.requester.transport.sent.some(frame=>decodeWire(frame.bytes).type==='RESPONSE_ACK'),false);
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'CANCELLED','cancellation must commit without needing another tick');
+  }finally{await w.close();}
+});
+
+test('denial cancels a received request; regrant and late correlated packets cannot revive it',async()=>{
+  const w=await makeWorld();try{
+    await w.importDoc('Outstanding observations awaiting local approval.');const view=await w.review();
+    ok(await w.owner.core.app.approveDraft({draftId:view.draftId,expectedRevision:view.revision,reviewedViewDigest:view.viewDigest}));
+    const approvedBytes=Uint8Array.from(w.inspect('owner','SELECT bytes FROM approvals')[0]!.bytes as Uint8Array);
+    const space=ok(await w.owner.core.app.getState({})).spaces[0]!;
+    const denied=ok(await w.owner.core.app.setMember({spaceId:w.spaceId,memberId:w.requester.memberId,active:false,capabilities:[],validUntilMs:null,expectedRevision:space.policyRevision}));
+    w.advance(6000);ok(await w.requester.core.app.refreshSpace({spaceId:w.spaceId}));w.advance(1000);await w.pump();
+    assert.equal(ok(await w.requester.core.app.getState({})).spaces[0]!.syncState,'DENIED');
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'CANCELLED');
+    ok(await w.owner.core.app.setMember({spaceId:w.spaceId,memberId:w.requester.memberId,active:true,capabilities:ALL,validUntilMs:null,expectedRevision:denied.policyRevision}));
+    w.advance(6000);ok(await w.requester.core.app.refreshSpace({spaceId:w.spaceId}));w.advance(1000);await w.pump();
+    assert.equal(ok(await w.requester.core.app.getState({})).spaces[0]!.syncState,'CURRENT');
+    for(const type of ['RECEIVED','CLOSED'] as const)await w.owner.transport.send(w.requester.key,encodeWire({v:1,type,requestId:view.requestId,spaceAlias:w.alias}));
+    await w.owner.transport.send(w.requester.key,approvedBytes);await w.pump();
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'CANCELLED');
+    assert.equal(w.inspect('requester','SELECT count(*) n FROM inbox')[0]!.n,0);
+    assert.equal(w.requester.transport.sent.some(frame=>decodeWire(frame.bytes).type==='RESPONSE_ACK'),false);
+    const fresh=await w.review();assert.notEqual(fresh.requestId,view.requestId);
+  }finally{await w.close();}
+});
+
+test('unchanged-policy restart retries the original outgoing question within its original TTL',async()=>{
+  const w=await makeWorld();try{
+    await w.importDoc('Outstanding observations survive connection loss.');
+    w.network.setFaults({disconnect:true});
+    const request=ok(await w.requester.core.app.submitQuestion({spaceId:w.spaceId,custodianKey:w.owner.key,query:'Outstanding observations?',ttlSeconds:3600}));
+    await w.requester.core.tick();
+    const before=w.inspect('requester','SELECT bytes,expires_wall,expires_mono FROM requests')[0]!;
+    w.advance(6000);await w.restart('requester');
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'OUTGOING');
+    w.network.setFaults({disconnect:false});ok(await w.requester.core.app.refreshSpace({spaceId:w.spaceId}));w.advance(1000);await w.pump();
+    const after=w.inspect('requester','SELECT bytes,expires_wall,expires_mono,state FROM requests')[0]!;
+    assert.equal(after.state,'RECEIVED');assert.deepEqual(after.bytes,before.bytes);
+    assert.equal(after.expires_wall,before.expires_wall);assert.equal(after.expires_mono,before.expires_mono);
+    assert.equal(ok(await w.owner.core.app.listReviews({spaceId:w.spaceId}))[0]!.requestId,request.requestId);
+    const frames=w.requester.transport.sent.filter(frame=>decodeWire(frame.bytes).type==='SEARCH_REQUEST');
+    assert.ok(frames.length>=2);assert.deepEqual(frames[0]!.bytes,frames.at(-1)!.bytes);
+  }finally{await w.close();}
+});
+
+test('an outgoing request cancelled at its authority lease boundary stays cancelled after unchanged renewal',async()=>{
+  const w=await makeWorld();try{
+    w.network.setFaults({disconnect:true});
+    const request=ok(await w.requester.core.app.submitQuestion({spaceId:w.spaceId,custodianKey:w.owner.key,query:'Outstanding observations?',ttlSeconds:3600}));
+    w.advance(899999);await w.requester.core.tick();
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'OUTGOING');
+    w.advance(1);await w.requester.core.tick();
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'CANCELLED');
+    const sends=w.requester.transport.sent.filter(frame=>decodeWire(frame.bytes).type==='SEARCH_REQUEST').length;
+    w.network.setFaults({disconnect:false});w.advance(11000);
+    ok(await w.requester.core.app.refreshSpace({spaceId:w.spaceId}));w.advance(1000);await w.pump();
+    assert.equal(ok(await w.requester.core.app.getState({})).spaces[0]!.syncState,'CURRENT');
+    assert.equal(w.inspect('requester','SELECT state FROM requests')[0]!.state,'CANCELLED');
+    assert.equal(w.requester.transport.sent.filter(frame=>decodeWire(frame.bytes).type==='SEARCH_REQUEST').length,sends);
+    const fresh=ok(await w.requester.core.app.submitQuestion({spaceId:w.spaceId,custodianKey:w.owner.key,query:'Fresh question?',ttlSeconds:3600}));
+    assert.notEqual(fresh.requestId,request.requestId);
   }finally{await w.close();}
 });
 

@@ -88,7 +88,7 @@ export class Delivery {
       s.checkpoint('dispatch_authorized');return {peerKey:approval.peer_key,bytes:Uint8Array.from(approval.bytes)};
     });
   }
-  receive(peer:string,message:ApprovedResponse,bytes:Uint8Array):Uint8Array{
+  receive(peer:string,message:ApprovedResponse,bytes:Uint8Array):Uint8Array|null{
     const {store:s,authority:a,clock}=this.c;const digest=digestBytes(bytes);
     return s.transaction(()=>{
       const prior=s.get<InboxRow>('SELECT * FROM inbox WHERE peer_key=? AND response_id=?',peer,message.responseId);
@@ -99,8 +99,11 @@ export class Delivery {
       }
       const request=s.get<RequestRow>('SELECT * FROM requests WHERE request_id=?',message.requestId);
       if(!request||request.direction!=='OUT'||request.peer_key!==peer||request.space_alias!==message.spaceAlias||!['OUTGOING','RECEIVED'].includes(request.state))throw new KuroError('INVALID_MESSAGE');
-      if(request.expires_wall<=clock.wallNowMs()||request.expires_mono<=clock.monotonicNowMs())throw new KuroError('EXPIRED');
       a.authorizeLocal(request.space_id,'receive');a.authorizePeer(request.space_id,peer,'share');
+      // Applying a due policy change during authorization may have cancelled this request.
+      const current=s.get<{state:string}>('SELECT state FROM requests WHERE request_id=?',request.request_id);
+      if(!current||!['OUTGOING','RECEIVED'].includes(current.state))return null;
+      if(request.expires_wall<=clock.wallNowMs()||request.expires_mono<=clock.monotonicNowMs())throw new KuroError('EXPIRED');
       if(message.passages.some(p=>p.ref.originKey!==peer))throw new KuroError('INVALID_MESSAGE');
       const wall=clock.wallNowMs();const expires=Math.min(request.expires_wall,wall+message.conditions.validForSeconds*1000,message.conditions.notAfterMs??Number.MAX_SAFE_INTEGER);
       if(expires<=wall)throw new KuroError('EXPIRED');

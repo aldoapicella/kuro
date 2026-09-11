@@ -26,22 +26,60 @@ quit
 
 `inspect` prints the exact stored review, including the revision and digest required by `approve`; human approval is never automatic. The initial corpus contains `PERMITTED`, `RESTRICTED-SENTINEL`, and a similarly named `PERMITTED` document in another space. Only the first has requester `receive` permission, so neither the restricted sentinel nor the other-space text may appear in the review.
 
-For the lost-ACK case, after approval run `pump 1` until the requester has received evidence (which queues its ACK), then run:
+For the lost-ACK case, enable the fault before the approval pump so the approved response still arrives and only the requester's durable receipt acknowledgment is withheld:
 
 ```text
 fault drop-ack
-pump 1
+approve DRAFT_ID REVISION VIEW_DIGEST
+pump
+state
 fault none
 restart requester
 advance 5000
 refresh
+advance 1000
 pump
 state
 ```
 
-The response is retried from immutable outbox bytes and the requester retains one inbox evidence item. `restart` is an orderly close/reopen within this single Node process; it demonstrates SQLite reopen/retry, not physical process-crash recovery. The independent real-transport loopback smoke command is `pnpm --filter @kuro/transport-harness smoke`.
+The first `state` includes a positive top-level `droppedAcks` count and requester evidence. The response is retried from immutable outbox bytes. `restart` is an orderly close/reopen within this single Node process; it demonstrates SQLite reopen/retry, not physical process-crash recovery. The independent real-transport loopback smoke command is `pnpm --filter @kuro/transport-harness smoke`.
 
-Other commands: `state`, `revise <draft> <all|spanIds> <summary|none>`, `reviews`, `evidence <response>`, `summary <response>`, `revoke`, `refresh`, `advance <milliseconds>`, `restart <requester|custodian>`, `fault <drop-ack|none>`, and `quit`. `summary` first shows that evidence remains readable when simulated generation is unavailable, then explicitly requests and runs the deterministic summary. `advance` changes only the deterministic clocks; run `pump` to service expiry/retries. During an authority outage, `advance 900000` followed by `pump` lets the requester lease expire; new work stays blocked until `refresh` succeeds. After `revoke`, `refresh` installs denial and an unsent delivery is cancelled rather than dispatched.
+For an authority outage and the original 15-minute lease boundary, run:
+
+```text
+fault disconnect
+advance 900000
+pump
+state
+fault none
+advance 11000
+refresh
+advance 1000
+pump
+state
+```
+
+The first state shows the requester cannot use the expired projection; the later state is `CURRENT`. The 11-second advance expires the failed outage sync before creating a fresh one. A `refresh` without an outstanding sync schedules its first send one simulated second later; a `refresh` with an outstanding sync reuses that sync and its existing retry schedule. `advance` persists its simulated wall and monotonic time in `harness.json`, so an orderly restart or a later harness process cannot manufacture a clock rollback.
+
+To show that a revoked approval is never revived by regranting membership, approve a draft but do not pump it first, then run:
+
+```text
+revoke
+advance 5000
+refresh
+advance 1000
+pump
+regrant
+advance 5000
+refresh
+advance 1000
+pump
+state
+```
+
+`regrant` restores the original `ALL` member capabilities through the owner `AppPort`; it does not alter the requester's local grants. The previously unsent approval remains cancelled, and a new request/review/approval is required. A `refresh` without an outstanding sync queues its first send for one simulated second later; advance 1,000 milliseconds before pumping it. After a policy change, advance 5,000 milliseconds before that refresh to respect the authority issuance limit.
+
+Other commands: `state`, `revise <draft> <all|spanIds> <summary|none>`, `reviews`, `evidence <response>`, `summary <response>`, `revoke`, `regrant`, `refresh`, `advance <milliseconds>`, `restart <requester|custodian>`, `fault <drop-ack|disconnect|none>`, and `quit`. `summary` first shows that evidence remains readable when simulated generation is unavailable, then explicitly requests and runs the deterministic summary. `fault drop-ack` drops only decoded requester outbound `RESPONSE_ACK` frames and increments top-level `state.droppedAcks`; `fault disconnect` uses the simulated `MemoryNetwork` disconnect fault, and each `fault` command replaces the prior fault. These are single-process, simulated clock/network demonstrations: they do not establish real QVAC, Pear, physical-device, or process-crash behavior.
 
 ## VM network peer endpoint
 

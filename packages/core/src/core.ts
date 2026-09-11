@@ -116,6 +116,9 @@ export class CustodyCore implements CoreLifecyclePort {
     s.run("UPDATE reviews SET state='CANCELLED' WHERE space_id=? AND state='REVIEW'",spaceId);
     s.run("UPDATE summaries SET state='CANCELLED',error_code='STALE_REVISION' WHERE space_id=? AND state IN ('SUMMARY_PENDING','RUNNING')",spaceId);
     s.run("UPDATE requests SET state='CANCELLED' WHERE space_id=? AND state IN ('QUEUED','RETRIEVING','REVIEW')",spaceId);
+    // A changed or expired authority also ends outbound requests and releases their quota.
+    // Lifecycle staleness alone may recover under unchanged policy and the original TTL.
+    if(reason!=='stale')s.run("UPDATE requests SET state='CANCELLED' WHERE space_id=? AND state IN ('OUTGOING','RECEIVED')",spaceId);
     const filter=reason==='stale'?' AND attempts=0':'';
     s.run(`UPDATE outbox SET state='CANCELLED' WHERE response_id IN (SELECT response_id FROM approvals WHERE space_id=?) AND state<>'ACKED'${filter}`,spaceId);
     for(const job of active){
@@ -206,8 +209,10 @@ export class CustodyCore implements CoreLifecyclePort {
         try{
           const bytes=this.#store.transaction(()=>{
             this.#authority.authorizeLocal(row.space_id,'search');this.#authority.authorizePeer(row.space_id,row.peer_key,'share');
-            this.#store.run('UPDATE requests SET attempts=attempts+1,next_attempt=? WHERE request_id=?',now+this.backoff(row.attempts),row.request_id);return Uint8Array.from(row.bytes);
-          });await this.options.transport.send(row.peer_key,bytes);
+            // Authorization may apply a due policy change and cancel this selected request.
+            const claimed=this.#store.run("UPDATE requests SET attempts=attempts+1,next_attempt=? WHERE request_id=? AND state='OUTGOING' AND expires_wall>? AND expires_mono>?",now+this.backoff(row.attempts),row.request_id,this.options.clock.wallNowMs(),this.options.clock.monotonicNowMs());
+            return claimed.changes===1?Uint8Array.from(row.bytes):null;
+          });if(bytes)await this.options.transport.send(row.peer_key,bytes);
         }catch{/* Retain original bytes/TTL. Authorization may recover only within their original bounds. */}
       }
       for(const row of this.#store.all<OutboxRow>("SELECT * FROM outbox WHERE state IN ('OUTBOX_READY','DISPATCHING','RETRY_WAIT') AND next_attempt<=? LIMIT 16",now)){

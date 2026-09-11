@@ -4,21 +4,40 @@ import { createInterface } from 'node:readline';
 import { openCore, secureIds } from '@kuro/core';
 import { FakeAiPort, FakeClock, FakePairing, FakeSession, MemorySelectedFiles } from '@kuro/core/testing';
 import { MemoryNetwork, MemoryTransport } from '@kuro/transport';
-import type { AppPort, Capability, LocalSession, Result } from '@kuro/contracts';
+import { decodeWire } from '@kuro/contracts';
+import type { AppPort, Capability, LocalSession, Result, TransportEvent, TransportPort } from '@kuro/contracts';
 import type { CustodyCore } from '@kuro/core';
 
 const CUSTODIAN = { memberId: '1'.repeat(32), key: 'a'.repeat(64) };
 const REQUESTER = { memberId: '2'.repeat(32), key: 'b'.repeat(64) };
 const ALL: Capability[] = ['search', 'read', 'share', 'receive', 'manage'];
 const REQUESTER_ACTIONS: Capability[] = ['search', 'read', 'share', 'receive', 'manage'];
-type Config = { spaceId: string; alias: string; permittedDocumentId: string; restrictedDocumentId: string; otherSpaceId: string };
+type Config = { spaceId: string; alias: string; permittedDocumentId: string; restrictedDocumentId: string; otherSpaceId: string; simulatedWallMs?: number; simulatedMonotonicMs?: number };
 type NodeName = 'custodian' | 'requester';
 type Node = { core: CustodyCore; app: AppPort; ai: FakeAiPort; clock: FakeClock; pairing: FakePairing; files: MemorySelectedFiles };
+
+class AckDroppingTransport implements TransportPort {
+  constructor(private readonly transport: TransportPort, private readonly shouldDrop: () => boolean, private readonly dropped: () => void) {}
+  start(): Promise<{ publicKey: string }> { return this.transport.start(); }
+  stop(): Promise<void> { return this.transport.stop(); }
+  subscribe(listener: (event: TransportEvent) => void): () => void { return this.transport.subscribe(listener); }
+  async send(peerKey: string, bytes: Uint8Array): Promise<void> {
+    try {
+      if (this.shouldDrop() && decodeWire(bytes).type === 'RESPONSE_ACK') {
+        this.dropped();
+        return;
+      }
+    } catch { /* Invalid bytes remain the transport's responsibility. */ }
+    await this.transport.send(peerKey, bytes);
+  }
+}
 
 class Harness {
   readonly network = new MemoryNetwork();
   readonly nodes = new Map<NodeName, Node>();
   config: Config | null = null;
+  private faultName: 'none' | 'drop-ack' | 'disconnect' = 'none';
+  private droppedAcks = 0;
   private readonly configPath: string;
   constructor(readonly stateDir: string) { this.configPath = join(stateDir, 'harness.json'); }
   async init(): Promise<void> {
@@ -32,7 +51,7 @@ class Harness {
     value(await custodian.app.setLocalPolicy({ spaceId: space.spaceId, memberId: REQUESTER.memberId, admitted: true, actions: REQUESTER_ACTIONS, validUntilMs: null, expectedRevision: related.policyEpoch }));
     const pairSpace = requester.pairing.verify({ kind: 'authority', spaceId: space.spaceId, authorityKey: CUSTODIAN.key, spaceAlias: alias });
     value(await requester.app.pairSpace({ selectionId: pairSpace, localActions: ALL }));
-    this.config = { spaceId: space.spaceId, alias, permittedDocumentId: '', restrictedDocumentId: '', otherSpaceId: '' };
+    this.config = { spaceId: space.spaceId, alias, permittedDocumentId: '', restrictedDocumentId: '', otherSpaceId: '', simulatedWallMs: custodian.clock.wallNowMs(), simulatedMonotonicMs: custodian.clock.monotonicNowMs() };
     await this.refresh();
     const requesterSpace = value(await requester.app.getState({})).spaces.find(s => s.spaceId === space.spaceId)!;
     value(await requester.app.setLocalPolicy({ spaceId: space.spaceId, memberId: CUSTODIAN.memberId, admitted: true, actions: ['share'], validUntilMs: null, expectedRevision: requesterSpace.policyEpoch }));
@@ -45,7 +64,7 @@ class Harness {
   }
   async open(): Promise<void> { if (!existsSync(this.configPath)) throw new Error(`not initialized: ${this.stateDir}; run init first`); this.config = JSON.parse(readFileSync(this.configPath, 'utf8')) as Config; await this.openBoth(); }
   async close(): Promise<void> { await Promise.all([...this.nodes.values()].map(node => node.core.stop())); this.nodes.clear(); }
-  async state(): Promise<void> { this.print({ custodian: value(await this.node('custodian').app.getState({})), requester: value(await this.node('requester').app.getState({})), networkPendingFrames: this.network.pendingFrames }); }
+  async state(): Promise<void> { this.print({ custodian: value(await this.node('custodian').app.getState({})), requester: value(await this.node('requester').app.getState({})), networkPendingFrames: this.network.pendingFrames, droppedAcks: this.droppedAcks, fault: this.faultName }); }
   async submit(question: string): Promise<void> { this.requireConfig(); this.print(value(await this.node('requester').app.submitQuestion({ spaceId: this.config!.spaceId, custodianKey: CUSTODIAN.key, query: question, ttlSeconds: 3600 }))); }
   async reviews(): Promise<void> { this.requireConfig(); this.print(value(await this.node('custodian').app.listReviews({ spaceId: this.config!.spaceId }))); }
   async inspect(draftId: string): Promise<void> { this.print(value(await this.node('custodian').app.getReview({ draftId }))); }
@@ -57,21 +76,23 @@ class Harness {
   async refresh(): Promise<void> { this.requireConfig(); this.print(value(await this.node('requester').app.refreshSpace({ spaceId: this.config!.spaceId }))); await this.pump(); }
   async restart(name: NodeName): Promise<void> { if (name !== 'custodian' && name !== 'requester') throw new Error('restart requires requester or custodian'); await this.node(name).core.stop(); this.nodes.delete(name); await this.openNode(name); this.print({ restarted: name, mode: 'orderly close/reopen in one process; not a process-crash claim' }); }
   async revoke(): Promise<void> { this.requireConfig(); const app = this.node('custodian').app; const space = value(await app.getState({})).spaces.find(s => s.spaceId === this.config!.spaceId)!; this.print(value(await app.setMember({ spaceId: space.spaceId, memberId: REQUESTER.memberId, active: false, capabilities: [], validUntilMs: null, expectedRevision: space.policyRevision }))); }
-  async advance(ms: string): Promise<void> { const amount = Number(ms); if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('advance requires nonnegative integer milliseconds'); for (const node of this.nodes.values()) node.clock.advance(amount); this.print({ advancedMs: amount, note: 'Run pump to service retries, expiry, and queued synchronization.' }); }
-  fault(name: string): void { if (name === 'drop-ack') this.network.setFaults({ loss: true }); else if (name === 'none') this.network.setFaults({}); else throw new Error('fault must be drop-ack or none'); this.print({ fault: name, note: name === 'drop-ack' ? 'Run immediately after evidence is received, before the next pump, to drop the queued ACK.' : undefined }); }
+  async regrant(): Promise<void> { this.requireConfig(); const app = this.node('custodian').app; const space = value(await app.getState({})).spaces.find(s => s.spaceId === this.config!.spaceId)!; this.print(value(await app.setMember({ spaceId: space.spaceId, memberId: REQUESTER.memberId, active: true, capabilities: ALL, validUntilMs: null, expectedRevision: space.policyRevision }))); }
+  async advance(ms: string): Promise<void> { const amount = Number(ms); if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('advance requires nonnegative integer milliseconds'); for (const node of this.nodes.values()) node.clock.advance(amount); this.persistClock(); this.print({ advancedMs: amount, note: 'Run pump to service retries, expiry, and queued synchronization.' }); }
+  fault(name: string): void { if (name !== 'drop-ack' && name !== 'disconnect' && name !== 'none') throw new Error('fault must be drop-ack, disconnect, or none'); this.faultName = name; this.network.setFaults(name === 'disconnect' ? { disconnect: true } : {}); this.print({ fault: name, note: name === 'drop-ack' ? 'Only requester outbound RESPONSE_ACK frames are dropped.' : name === 'disconnect' ? 'All paired sends fail until fault none.' : undefined }); }
   private async openBoth(): Promise<void> { await this.openNode('custodian'); await this.openNode('requester'); }
-  private async openNode(name: NodeName): Promise<void> { const identity = name === 'custodian' ? CUSTODIAN : REQUESTER; const clock = new FakeClock(); const pairing = new FakePairing(secureIds); const files = new MemorySelectedFiles(secureIds); const ai = new FakeAiPort(); const transport = new MemoryTransport({ network: this.network, publicKey: identity.key, pairedPeers: [name === 'custodian' ? REQUESTER.key : CUSTODIAN.key] }); const session: LocalSession = { memberId: identity.memberId, deviceKey: identity.key, validUntilMs: Number.MAX_SAFE_INTEGER }; const core = await openCore({ databasePath: join(this.stateDir, `${name}.sqlite`), ai, transport, clock, ids: secureIds, sessions: new FakeSession(session), selectedFiles: files, pairing, clockInitiallyTrusted: true }); this.nodes.set(name, { core, app: core.app, ai, clock, pairing, files }); }
+  private async openNode(name: NodeName): Promise<void> { const identity = name === 'custodian' ? CUSTODIAN : REQUESTER; const clock = new FakeClock(this.config?.simulatedWallMs, this.config?.simulatedMonotonicMs); const pairing = new FakePairing(secureIds); const files = new MemorySelectedFiles(secureIds); const ai = new FakeAiPort(); const memoryTransport = new MemoryTransport({ network: this.network, publicKey: identity.key, pairedPeers: [name === 'custodian' ? REQUESTER.key : CUSTODIAN.key] }); const transport: TransportPort = name === 'requester' ? new AckDroppingTransport(memoryTransport, () => this.faultName === 'drop-ack', () => { this.droppedAcks++; }) : memoryTransport; const session: LocalSession = { memberId: identity.memberId, deviceKey: identity.key, validUntilMs: Number.MAX_SAFE_INTEGER }; const core = await openCore({ databasePath: join(this.stateDir, `${name}.sqlite`), ai, transport, clock, ids: secureIds, sessions: new FakeSession(session), selectedFiles: files, pairing, clockInitiallyTrusted: true }); this.nodes.set(name, { core, app: core.app, ai, clock, pairing, files }); }
   private async import(node: Node, spaceId: string, text: string, rules: { memberId: string; actions: Capability[]; validUntilMs: null }[]): Promise<string> { const selectionId = node.files.add(text); const imported = value(await node.app.importText({ spaceId, selectionId, replaceDocumentId: null, expectedRevision: null, rules })); await this.pump(); return imported.documentId; }
   private node(name: NodeName): Node { const node = this.nodes.get(name); if (!node) throw new Error(`${name} is not running`); return node; }
   private requireConfig(): void { if (!this.config) throw new Error('harness is not initialized'); }
+  private persistClock(): void { this.requireConfig(); const clock = this.node('custodian').clock; this.config!.simulatedWallMs = clock.wallNowMs(); this.config!.simulatedMonotonicMs = clock.monotonicNowMs(); this.save(); }
   private save(): void { writeFileSync(this.configPath, `${JSON.stringify(this.config)}\n`, { mode: 0o600 }); }
   private print(value: unknown): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
 }
 function value<T>(result: Result<T>): T { if (!result.ok) throw new Error(`core returned ${result.error.code}`); return result.value; }
 function conditions(summary: string, expiresAtMs: number) { if (summary !== 'summary' && summary !== 'none') throw new Error('conditions must be summary or none'); return { v: 1 as const, allowLocalSummary: summary === 'summary', forwarding: 'forbidden' as const, validForSeconds: 3600, notAfterMs: expiresAtMs }; }
-function usage(): string { return 'commands: init | state | submit <question> | reviews | inspect <draft> | revise <draft> <all|spanIds> <summary|none> | review-conditions <draft> <summary|none> | approve <draft> <revision> <digest> | pump [turns] | evidence <response> | summary <response> | fault <drop-ack|none> | restart <requester|custodian> | revoke | advance <ms> | refresh | quit'; }
+function usage(): string { return 'commands: init | state | submit <question> | reviews | inspect <draft> | revise <draft> <all|spanIds> <summary|none> | review-conditions <draft> <summary|none> | approve <draft> <revision> <digest> | pump [turns] | evidence <response> | summary <response> | fault <drop-ack|disconnect|none> | restart <requester|custodian> | revoke | regrant | advance <ms> | refresh | quit'; }
 const stateFlag = process.argv.indexOf('--state'); const stateDir = resolve(stateFlag >= 0 && process.argv[stateFlag + 1] ? process.argv[stateFlag + 1]! : join(process.cwd(), '.kuro-core-harness')); const harness = new Harness(stateDir); let opened = false;
-async function execute(line: string): Promise<boolean> { const [command = '', ...rest] = line.trim().split(/\s+/); if (!command || command.startsWith('#')) return true; if (command === 'init') { await harness.init(); opened = true; return true; } if (command === 'quit') return false; if (!opened) { await harness.open(); opened = true; } switch (command) { case 'state': await harness.state(); break; case 'submit': await harness.submit(rest.join(' ')); break; case 'reviews': await harness.reviews(); break; case 'inspect': await harness.inspect(required(rest, 0)); break; case 'revise': await harness.revise(required(rest, 0), required(rest, 1), required(rest, 2)); break; case 'review-conditions': await harness.revise(required(rest, 0), 'all', required(rest, 1)); break; case 'approve': await harness.approve(required(rest, 0), required(rest, 1), required(rest, 2)); break; case 'pump': await harness.pump(rest[0] ? Number(rest[0]) : 4); break; case 'evidence': await harness.evidence(required(rest, 0)); break; case 'summary': await harness.summary(required(rest, 0)); break; case 'fault': harness.fault(required(rest, 0)); break; case 'restart': await harness.restart(required(rest, 0) as NodeName); break; case 'revoke': await harness.revoke(); break; case 'advance': await harness.advance(required(rest, 0)); break; case 'refresh': await harness.refresh(); break; case 'help': process.stdout.write(`${usage()}\n`); break; default: throw new Error(`unknown command: ${command}; ${usage()}`); } return true; }
+async function execute(line: string): Promise<boolean> { const [command = '', ...rest] = line.trim().split(/\s+/); if (!command || command.startsWith('#')) return true; if (command === 'init') { await harness.init(); opened = true; return true; } if (command === 'quit') return false; if (!opened) { await harness.open(); opened = true; } switch (command) { case 'state': await harness.state(); break; case 'submit': await harness.submit(rest.join(' ')); break; case 'reviews': await harness.reviews(); break; case 'inspect': await harness.inspect(required(rest, 0)); break; case 'revise': await harness.revise(required(rest, 0), required(rest, 1), required(rest, 2)); break; case 'review-conditions': await harness.revise(required(rest, 0), 'all', required(rest, 1)); break; case 'approve': await harness.approve(required(rest, 0), required(rest, 1), required(rest, 2)); break; case 'pump': await harness.pump(rest[0] ? Number(rest[0]) : 4); break; case 'evidence': await harness.evidence(required(rest, 0)); break; case 'summary': await harness.summary(required(rest, 0)); break; case 'fault': harness.fault(required(rest, 0)); break; case 'restart': await harness.restart(required(rest, 0) as NodeName); break; case 'revoke': await harness.revoke(); break; case 'regrant': await harness.regrant(); break; case 'advance': await harness.advance(required(rest, 0)); break; case 'refresh': await harness.refresh(); break; case 'help': process.stdout.write(`${usage()}\n`); break; default: throw new Error(`unknown command: ${command}; ${usage()}`); } return true; }
 function required(values: string[], index: number): string { const value = values[index]; if (!value) throw new Error(`missing argument; ${usage()}`); return value; }
 const lines = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout, prompt: 'kuro-core> ' }) : createInterface({ input: process.stdin });
 if (process.stdin.isTTY) { process.stdout.write('SIMULATED AI + SIMULATED MEMORY TRANSPORT. No QVAC or Pear process ran.\n'); lines.prompt(); }
