@@ -5,11 +5,31 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import test from 'node:test';
 import { build } from 'esbuild';
+import spawn from 'bare-runtime/spawn';
+import type { Socket } from 'node:net';
 import { BareTransportWorker } from '../src/bare-worker.js';
 import { encodeIpc, IpcDecoder, MAX_IPC_BYTES, parseHostCommand, parseWorkerReply } from '../src/worker-ipc.js';
 import type { WorkerConfig } from '../src/worker-protocol.js';
 
 const config: WorkerConfig = { seed: new Uint8Array(32).fill(1), bootstrap: [], port: undefined, pairedPeers: [], maxConnections: 2, maxBufferedBytes: 131088, maxQueuedSends: 2, connectionTimeoutMs: 1000 };
+
+test('loss of the inherited host pipe exits Bare before and during network startup', async () => {
+  for (const initialize of [false, true]) {
+    const child = spawn({ args: [fileURLToPath(new URL('../dist/bare-worker.mjs', import.meta.url))], stdio: ['ignore', 'ignore', 'ignore', 'pipe'] });
+    const pipe = child.stdio[3] as Socket;
+    pipe.on('error', () => {});
+    const exited = once(child, 'exit');
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 5000);
+    try {
+      await once(pipe, 'data'); // Actual Bare runtime has opened its inherited pipe.
+      if (initialize) pipe.write(encodeIpc({ type: 'init', config: { ...config, bootstrap: [{ host: '127.0.0.1', port: 9 }] } }));
+      pipe.end();
+      assert.deepEqual(await exited, [1, null]);
+      assert.equal(timedOut, false);
+    } finally { clearTimeout(timer); child.kill('SIGKILL'); pipe.destroy(); }
+  }
+});
 
 test('stopping the actual Bare worker before its handshake or bootstrap completes exits cleanly', async () => {
   for (const waitMs of [0, 100]) {
