@@ -1,0 +1,16 @@
+import { build } from 'esbuild';
+import { mkdir, copyFile, rm } from 'node:fs/promises';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { stageDesktop } from './stage.mjs';
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const output = resolve(workspace, 'build/desktop');
+await rm(output, { recursive: true, force: true });
+await stageDesktop(workspace, output);
+await mkdir(resolve(output, 'host'), { recursive: true });
+await mkdir(resolve(output, 'renderer'), { recursive: true });
+const common = { absWorkingDir: workspace, bundle: true, target: 'es2023', logLevel: 'info' };
+await build({ ...common, entryPoints: ['apps/desktop/src/main.ts'], outdir: resolve(output, 'host'), platform: 'node', format: 'esm', splitting: true, chunkNames: '[name]-[hash]', packages: 'external' });
+await build({ ...common, entryPoints: ['apps/desktop/src/preload.ts'], outfile: resolve(output, 'host/preload.cjs'), platform: 'node', format: 'cjs', external: ['electron'] });
+await build({ ...common, entryPoints: ['apps/desktop/src/renderer/index.ts'], outfile: resolve(output, 'renderer/renderer.js'), platform: 'browser', format: 'esm' });
+for (const file of ['index.html', 'styles.css']) await copyFile(resolve(workspace, 'apps/desktop/src/renderer', file), resolve(output, 'renderer', file));

@@ -91,6 +91,20 @@ export interface AppOutputs {
   approveDraft: { responseId: string }; getEvidence: EvidenceView;
   requestLocalSummary: { summaryId: string; jobId: string }; getSummary: SummaryView; cancelJob: null;
 }
+/** Validated host-to-renderer replies. Existing AppPort inputs and semantics are unchanged. */
+export const AppOutputSchemas = {
+  createSpace: SpaceViewSchema, pairSpace: SpaceViewSchema, replaceAuthority: SpaceViewSchema,
+  enrollMember: SpaceViewSchema, setMember: SpaceViewSchema, setRelationship: SpaceViewSchema,
+  pairPeer: z.null(), refreshSpace: z.strictObject({ requestId: IDSchema }),
+  setLocalPolicy: SpaceViewSchema, setDocumentRules: z.strictObject({ revision }),
+  importText: z.strictObject({ documentId: IDSchema, versionId: IDSchema, jobId: IDSchema, revision }),
+  setIndexProfile: z.strictObject({ jobId: IDSchema }), submitQuestion: z.strictObject({ requestId: IDSchema }),
+  getState: StateViewSchema, listReviews: z.array(ReviewViewSchema).max(256),
+  getReview: ReviewViewSchema, reviseDraft: ReviewViewSchema,
+  approveDraft: z.strictObject({ responseId: IDSchema }), getEvidence: EvidenceViewSchema,
+  requestLocalSummary: z.strictObject({ summaryId: IDSchema, jobId: IDSchema }),
+  getSummary: SummaryViewSchema, cancelJob: z.null(),
+} satisfies { [K in AppCommandName]: z.ZodType<AppOutputs[K]> };
 export type AppPort = {
   [K in AppCommandName]: (input: AppInput<K>) => Promise<Result<AppOutputs[K]>>;
 } & { subscribe(listener: (event: CommittedEvent) => void): () => void };

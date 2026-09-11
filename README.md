@@ -69,6 +69,8 @@ The following pre-existing material forms the initial base of this submission:
 
 - The AI adapter uses [QVAC SDK/inference 0.19.0](https://github.com/tetherto/qvac) (Apache-2.0), with pinned GTE/Qwen model descriptors and no bundled weights. Its source adapts the AI implementation introduced in PR #4 to the existing contracts. `require-asset` 1.2.2 (Apache-2.0) supplies Bare's explicitly installed runtime loader. Vitest 2.1.9 (MIT) runs adapter tests; Node runs the SQLite integration. See [D27](docs/decisions/D27-qvac-adapter-integration.md) for provenance, runtime boundaries and model validation.
 
+- The desktop uses Electron 44.3.0, esbuild 0.28.2, @electron/packager 20.3.0 and Playwright 1.63.0 through the pinned workspace. `pnpm deploy --prod` stages the existing dependency graph for distribution; KURO's staging logic, isolated renderer, host safety boundaries, synthetic probes, and UI are newly authored. Native SDK packages remain external runtime dependencies, and no Electron template, model weights, documents, credentials, or generated package output is incorporated into source control. See [D29](docs/decisions/D29-desktop-integration.md).
+
 Record the origin, version, and applicable license of any additional code, templates, models, or examples introduced during implementation. This repository remains private; no open-source license has been selected for KURO.
 
 ## Submission access

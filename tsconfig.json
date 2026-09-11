@@ -17,6 +17,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["packages/**/*.ts", "harnesses/**/*.ts", "tests/**/*.ts"],
+  "include": ["packages/**/*.ts", "harnesses/**/*.ts", "tests/**/*.ts", "apps/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
