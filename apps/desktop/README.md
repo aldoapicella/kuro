@@ -6,14 +6,29 @@ Protected review, evidence, and summary details are cleared before authorization
 
 The host keeps renderer authority narrow: the renderer receives named AppPort and DesktopHostPort commands only. It cannot provide paths, identities, IPC channel names, SQL, sockets, Node APIs, SDK objects, or worker creation. File and pairing selection occur in the host, validate bounded records, and require an explicit pairing-detail confirmation.
 
-## Run
+## Install a published preview
 
-From the workspace root, use the pinned Node and pnpm versions in package.json:
+Publication is still awaiting the acceptance gates below. Once a preview appears
+in [GitHub Releases](https://github.com/aldoapicella/kuro/releases), download its
+`darwin-arm64-unsigned-preview.tar.gz` asset using an account with repository
+access. Open the archive in Finder, open the extracted `KURO-darwin-arm64` folder,
+and drag **KURO.app** to **Applications**. Double-click KURO to launch it. No
+Node, pnpm, compiler, Homebrew installation, or developer checkout is needed.
 
-```sh
-pnpm install --frozen-lockfile
-pnpm desktop:demo
-```
+This preview is not Developer ID signed or notarized. If macOS asks you to
+approve this downloaded preview, use **System Settings → Privacy & Security →
+Open Anyway**, then confirm **Open**, following
+[Apple's per-application instructions](https://support.apple.com/102445).
+Protected keychain access can require a separate macOS prompt. Enter the
+credential only in that native prompt.
+
+For replacement, quit KURO, replace only **KURO.app** in Applications, and reopen
+it. Keep the previous archive for recovery. Profile data is stored separately
+under `~/Library/Application Support/KURO/real/A`; moving the app does not move
+or erase the profile. This first preview has no earlier supported release to
+migrate, and development databases are unsupported.
+
+## First-run setup
 
 The first screen is **Setup**. Enter a device name and private LAN bootstrap details, choose whether to host the private bootstrap, optionally choose a local UDP port, and select **Save profile and start workspace**. You can link an existing identity before the first start; when running, **Export my public identity for a linked device** exports public identity material. macOS may show a SecurityAgent prompt for protected keychain access. Approve it in macOS; KURO never asks you to paste or expose a keychain credential.
 
@@ -25,11 +40,22 @@ Use **Spaces** to create an owner space, join or enroll from an exported invitat
 
 The GUI keeps error codes visible and gives a next step: restore the clock and refresh for `CLOCK_UNCERTAIN`; check shared membership plus local/document permission for `ACCESS_DENIED`; refresh and review current data for `STALE_REVISION`; prepare models for `MODEL_UNAVAILABLE`; check the private LAN for `PEER_OFFLINE`; unlock or repair the protected keychain for `IDENTITY_UNAVAILABLE`; and wait, cancel, retry, or refresh after capacity, cancellation, or expiry errors.
 
-## Build, package, and probes
+## Development, packaging, and probes
+
+Source execution uses the pinned Node and pnpm versions in the root manifest:
 
 ```sh
-pnpm --filter @kuro/desktop build
-pnpm --filter @kuro/desktop package
+pnpm install --frozen-lockfile
+pnpm desktop:real
+```
+
+`pnpm desktop:demo` selects explicitly scripted demo data; it does not exercise
+real inference or transport. `pnpm desktop:integrated` runs actual core and
+SQLite with simulated adapters.
+
+```sh
+pnpm desktop:build
+pnpm desktop:package
 pnpm --filter @kuro/desktop start -- --probe=host
 pnpm --filter @kuro/desktop start -- --probe=runtime
 pnpm --filter @kuro/desktop start -- --probe=inference
@@ -48,15 +74,15 @@ The lifecycle probe uses the actual native Clock and two SQLite cores with expli
 
 ## Preview size and validation
 
-`0.1.0-preview.1` needs at least 8 GiB for the app, about 2 GiB for weights, and working cache; 12 GiB free is the practical recommendation. The only tested memory configuration is an M5 Pro with 48 GB unified memory. The archive is 1,860,996,936 bytes and the unpacked distribution is about 5.5 GiB. It contains two vendored non-Apple dylibs with OpenSSL licenses and 943 internal symlinks with no external targets. It is ad-hoc signed, not Developer ID signed or notarized; publication has not run.
+`0.1.0-preview.1` needs at least 8 GiB for the app, about 2 GiB for weights, and working cache; 12 GiB free is the practical recommendation. The only tested memory configuration is an M5 Pro with 48 GB unified memory. The rebuilt `b762992` archive is 1,860,910,230 bytes; the earlier measured unpacked distribution was about 5.5 GiB. It contains two vendored non-Apple dylibs with OpenSSL licenses and 943 internal symlinks with no external targets. It is ad-hoc signed, not Developer ID signed or notarized; publication has not run.
 
 | Area | Recorded state |
 | --- | --- |
-| Source two-process GUI workflow | Passed in 49.2 seconds with actual QVAC, Bare, SQLite, protected identity, setup, default-deny grants, restricted/cross-space exclusion, explicit automated approval, and requester-local summary. |
-| GUI failure coverage | Reached lost-ACK identical retry, one inbox restart, model-free reading, and explicit unavailable-model handling. A fixture defect was fixed; final expanded pass pending. |
+| Source two-process GUI workflow | Commit `b762992` passed the expanded actual-QVAC/Bare workflow in 57.8 seconds, including protected setup, permissions, restricted/cross-space exclusion, explicit automated approval, summary, restart, and revocation. |
+| GUI failure coverage | The expanded source test passed lost-ACK identical retry, one inbox effect, requester restart, model-free reading, explicit unavailable-model recovery, lock/unlock invalidation, fresh synchronization, and owner GUI device revocation. |
 | Packaged GUI workflow | Candidate archive `2d0288…`, run outside the checkout in a normal OS home with fresh user data and a system-only `PATH`, passed in 49.8 seconds with actual QVAC and Bare. It covered lost-ACK retries, durable inbox exact-byte deduplication, requester restart with model-free evidence reads, missing-model summary recovery, and lock/unlock invalidation with fresh synchronization. |
-| Offline LAN | No offline GUI pass yet. A matching macOS 25F71 restore image download was verified; guest provisioning is in progress. |
-| CI and release | Four Linux/macOS push and PR jobs were green at checkpoint `28d7145`. The candidate archive predates the latest re-hash-before-SDK-load security fix; final source/package qualification, CI, release dispatch, and publication remain pending. |
+| Offline LAN | Two macOS 25F71 VZ guests have distinct virtual-LAN addresses and verified model caches. The bundled native clock loads and samples in the owner guest. Both guests passed manual PF install, fresh-SSH egress checks, UDP capture, and removal. Guest GUI login, runtime/lifecycle qualification, and the complete offline workflow remain pending. |
+| CI and release | All four Linux/macOS push and PR jobs passed at `b762992`. Its rebuilt archive includes the model re-hash fix and passed relocated host/native-lifecycle probes; full GUI launch awaits native Keychain authorization. Final archive qualification and publication remain pending. |
 
 The lifecycle probe uses native clock behavior with simulated AI and transport. Its earlier physical sleep/wake pass establishes that lifecycle boundary, not a full real-mode GUI or cross-device LAN run. Package and release acceptance is tracked in the [MVP handoff](../../docs/development/mvp-release-handoff.md).
 

@@ -35,7 +35,79 @@ for the isolated virtual-LAN qualification. Do not commit this configuration,
 model files, or its setup data. The qualifier rejects relative paths and records
 only bounded evidence outputs under `build/release-evidence/`.
 
+## Isolated virtual-LAN qualification
+
+The offline coordinator is `scripts/offline-gui.mjs`. It runs the archived app
+in two macOS VZ guests with independent kernels, protected identities, and
+SQLite databases on one physical Mac. This is virtual-device evidence. The
+source and earlier relocated two-process runs use loopback and share the host
+kernel; they cannot satisfy this gate.
+
+`scripts/offline-lima-macos-vlan.sh` writes private Lima definitions under
+`$KURO_VALIDATION_HOME/offline/lima`. It verifies the exact macOS 26.5 / 25F71
+IPSW before writing them. Set `KURO_MACOS_IPSW` when the image is elsewhere.
+It defines two 4-CPU, 12-GiB, 80-GiB macOS guests and a small Linux control guest,
+with no host mounts. Creating the dedicated `ko` user-v2 network and starting
+the guests are separate Lima operator actions. Do not attach an additional
+network. Complete normal graphical login and native Keychain prompts directly
+inside each macOS guest before running qualification.
+
+The private `offlineConfiguration` JSON contains `limaHome` and two objects,
+`owner` and `requester`, with these fields:
+
+| Fields | Required value |
+| --- | --- |
+| `instance`, `sshConfig`, `sshHost` | Distinct Lima names, absolute host paths to their SSH configuration, and the corresponding SSH aliases. The tested names are `ko-o` and `ko-q`. |
+| `guestValidationRoot`, `guestRunRoot` | Absolute private guest directories. The run directory must be strictly inside the validation directory; the coordinator checks real paths and symlink containment before destructive cleanup and replaces it for each run. Do not put anything to preserve there. |
+| `driverDirectory`, `driverEvidenceDirectory`, `publicRecordDirectory`, `documentDirectory`, `pcapPath` | Separate paths inside `guestRunRoot` for fresh app profiles, screenshots, GUI-exported public records, synthetic inputs, and the capture. |
+| `guestNodePath`, `guestNodeModulesPath` | Verified Node 24.19.0 and the repository's pinned Playwright dependencies, staged privately inside `guestValidationRoot` and outside `guestRunRoot`. These drive the test; KURO runs with only system directories on `PATH`. |
+| `sudoCredentialPath` | The guest's disposable login credential file, owned by its guest user and mode `0400` or `0600`. The reviewed helper feeds it directly to guest `sudo` through stdin. No credential value belongs in JSON, arguments, environment variables, logs, or Git. |
+| `peerIp`, `routerIp`, `managementIp`, `lanInterface` | Observed addresses and non-loopback interface. The current topology uses owner `.3`, requester `.4`, Linux control `.1`, and Lima management `.2` within `192.168.241.0/24`, on `en0`. |
+| `modelCache.embedding`, `modelCache.summary` | Each has a guest-private absolute `path`, expected `bytes`, and pinned `sha256`. The paths stay inside `guestValidationRoot`, outside the run directory. Use the model identifiers and hashes from the desktop's model asset definitions. |
+
+Store the host JSON with mode `0600`. Stage the verified model weights and
+test-controller runtime before applying the egress gate. The coordinator copies
+the exact supplied archive and current reviewed test scripts, checks their
+hashes, extracts the app, and creates fresh profile directories. It does not
+seed product permissions, approvals, or databases. Public invitation and
+enrollment files originate from the GUI. Native chooser confirmations and
+approval clicks are explicit automated test actions.
+
+For a diagnostic run outside the release workflow:
+
+```sh
+node scripts/offline-gui.mjs \
+  --configuration /absolute/private/path/offline-config.json \
+  --archive /absolute/path/KURO-0.1.0-preview.1-darwin-arm64-unsigned-preview.tar.gz \
+  --source-sha 0123456789abcdef0123456789abcdef01234567 \
+  --version 0.1.0-preview.1 \
+  --evidence /absolute/private/path/offline-evidence
+```
+
+Use the archive's actual source SHA. A release always invokes this command
+itself against its final archive; an externally supplied passing report is not
+accepted. Success requires distinct live guest boot IDs, qualified native
+probes, fresh GUI setup, exact reviewed delivery, lost-ACK retries, reconnect,
+model-free evidence reads, actual QVAC summary and literal citations, and GUI
+revocation. Both guests must fail external TCP controls before and after the
+workflow. Bounded Ethernet/IPv4/UDP header captures must show traffic between
+their actual LAN addresses. The report records relative capture paths and
+verified cleanup; a failed cleanup keeps the gate failed.
+
+The PF helper only operates inside disposable guests. Its rollback is armed
+before rules are loaded and committed only after a fresh independent SSH
+connection verifies blocked egress. SSH management replies are the explicit
+control-plane exception. A 30-minute guest-side recovery timer remains armed
+after commit and is cancelled by normal removal. Normal cleanup stops the test processes and captures
+and restores each guest's prior PF configuration; host PF is never changed.
+Passing the PF and capture controls alone does not qualify the full GUI.
+
 ## Qualified runner lifecycle
+
+Run the listener in the logged-in macOS GUI account on the qualified host.
+Native Keychain approval for a newly built app remains a direct macOS action;
+the release scripts do not bypass it. The two validation guests also require
+their own graphical sessions and protected-storage access.
 
 Prepare the runner once with `node scripts/release-runner-install.mjs`. The
 installer downloads the official `actions/runner` 2.337.0 macOS arm64 archive,

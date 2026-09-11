@@ -48,7 +48,12 @@ jobs:
         if: runner.os == 'macOS'
         run: node --test apps/desktop/test/macos-native-deps.test.mjs scripts/release-runner-guard.test.mjs
       - name: Verify release metadata and qualification gates
-        run: node --test scripts/release-validate.test.mjs
+        run: |
+          node --test scripts/release-validate.test.mjs
+          node --check scripts/qualify-release.mjs
+          node --check scripts/offline-gui.mjs
+          node --check apps/desktop/ui/remote-driver.mjs
+          for script in scripts/offline-*.sh; do sh -n "$script"; done
       - name: Build and package without source manifest mutation
         run: node scripts/check-source-packaging.mjs pnpm desktop:package
       - name: Configure Linux Chromium sandbox helpers

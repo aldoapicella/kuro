@@ -3,7 +3,7 @@ import { open, mkdir, mkdtemp, readFile, writeFile, stat, realpath, rm, cp, read
 import { tmpdir, release } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertSourceSha, assertVersion, previewArchiveName, REQUIRED_QUALIFICATION_CHECKS, QUALIFIED_RUNNER, sha256, validateRelease } from './release-validate.mjs';
+import { assertSourceSha, assertVersion, previewArchiveName, REQUIRED_QUALIFICATION_CHECKS, QUALIFIED_RUNNER, sha256, validateRelease, validateOfflineQualification } from './release-validate.mjs';
 
 // This runner produces evidence by executing the final archive. It has no skip,
 // simulated-inference, or externally supplied passing-report escape hatch.
@@ -118,9 +118,11 @@ try {
     '--archive', archive, '--source-sha', sourceSha, '--version', version, '--evidence', join(evidenceDirectory, 'offline')], { timeoutMs: 1_800_000 });
   const offlineReportPath = join(evidenceDirectory, 'offline/result.json');
   const offline = JSON.parse(await readFile(offlineReportPath, 'utf8'));
-  if (offline.status !== 'passed' || offline.sourceSha !== sourceSha || offline.artifactSha256 !== report.artifact.sha256 ||
-      !offline.freshPeerStartup || !offline.reconnected || !offline.externalBlockedBefore || !offline.externalBlockedAfter || offline.topology !== 'two-qualified-macos-guests-on-isolated-virtual-lan') throw new Error('Offline virtual GUI qualification did not prove its required boundaries');
-  await passed('offline-virtual-lan-egress-reconnect', [offlineLog, offlineReportPath, ...await files(join(evidenceDirectory, 'offline'), '.pcap')]);
+  const packetCaptures = await files(join(evidenceDirectory, 'offline'), '.pcap');
+  validateOfflineQualification(offline, { version, sourceSha, artifactSha256: report.artifact.sha256,
+    captures: await Promise.all(packetCaptures.map(async path => ({ path: relative(join(evidenceDirectory, 'offline'), path), bytes: (await stat(path)).size }))),
+  });
+  await passed('offline-virtual-lan-egress-reconnect', [offlineLog, offlineReportPath, ...packetCaptures]);
   if (await sha256(archive) !== report.artifact.sha256 || (await stat(archive)).size !== report.artifact.bytes) throw new Error('The archive changed during qualification');
   await validateRelease({ workspace, version, sourceSha, artifactDirectory: dirname(archive), qualificationReport: reportPath });
   console.log(JSON.stringify({ status: 'passed', version, sourceSha, artifact: report.artifact }));

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertSourceSha, assertVersion, parseChecksum, previewArchiveName, releaseNotes, sha256, validateQualificationReport } from './release-validate.mjs';
+import { assertSourceSha, assertVersion, parseChecksum, previewArchiveName, releaseNotes, sha256, validateQualificationReport, validateOfflineQualification } from './release-validate.mjs';
 
 test('forms the sole supported unsigned macOS preview name', () => {
   assert.equal(previewArchiveName('0.1.0-preview.1'), 'KURO-0.1.0-preview.1-darwin-arm64-unsigned-preview.tar.gz');
@@ -44,4 +44,28 @@ test('streams artifact hashing without changing its digest', async () => {
     await writeFile(artifact, Buffer.alloc(3 * 1024 * 1024 + 17, 0x5a));
     assert.equal(await sha256(artifact), 'ac05ef6d1cf392866a88278845b6477ee943be578a7ab3c90a61e13caa1766e5');
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('offline evidence cannot pass with reused guests, stale bytes, unfinished cleanup or missing traffic', () => {
+  const version = '0.1.0-preview.1', sourceSha = 'a'.repeat(40), artifactSha256 = 'b'.repeat(64);
+  const report = { status: 'passed', version, sourceSha, artifactSha256,
+    freshPeerStartup: true, reconnected: true, externalBlockedBefore: true, externalBlockedAfter: true,
+    cleanup: { verified: true }, topology: 'two-qualified-macos-guests-on-isolated-virtual-lan',
+    native: { owner: { bootSessionId: '11111111-1111-1111-1111-11111111111a' }, requester: { bootSessionId: '22222222-2222-2222-2222-222222222222' } },
+    packets: { owner: 'packets/owner.pcap', requester: 'packets/requester.pcap' },
+  };
+  const expected = { version, sourceSha, artifactSha256, captures: Object.values(report.packets).map(path => ({ path, bytes: 82 })) };
+  assert.doesNotThrow(() => validateOfflineQualification(report, expected));
+  for (const field of ['version', 'sourceSha', 'artifactSha256']) assert.throws(() => validateOfflineQualification({ ...report, [field]: 'different' }, expected));
+  for (const field of ['freshPeerStartup', 'reconnected', 'externalBlockedBefore', 'externalBlockedAfter']) {
+    for (const value of [false, 'true', undefined]) assert.throws(() => validateOfflineQualification({ ...report, [field]: value }, expected));
+  }
+  for (const cleanup of [undefined, { verified: false }, { verified: 'true' }]) assert.throws(() => validateOfflineQualification({ ...report, cleanup }, expected));
+  const sameGuest = structuredClone(report); sameGuest.native.requester.bootSessionId = sameGuest.native.owner.bootSessionId.toUpperCase();
+  assert.throws(() => validateOfflineQualification(sameGuest, expected));
+  assert.throws(() => validateOfflineQualification({ ...report, native: {} }, expected));
+  assert.throws(() => validateOfflineQualification({ ...report, packets: { ...report.packets, owner: '/tmp/owner.pcap' } }, expected));
+  for (const captures of [[], expected.captures.slice(1), [expected.captures[0], expected.captures[0]], expected.captures.map(item => ({ ...item, bytes: 24 }))]) {
+    assert.throws(() => validateOfflineQualification(report, { ...expected, captures }));
+  }
 });

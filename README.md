@@ -6,7 +6,7 @@ KURO lets participants query information held by trusted peers while each custod
 
 ## Project status
 
-The custody core, public TypeScript contracts, persistent SQLite workflow, authenticated Bare transport, and desktop renderer are implemented. Source model downloads and a two-process packaged desktop workflow passed with actual QVAC, Bare, SQLite, and protected identities; approvals and requester-local summaries were explicit automated test actions. The candidate package predates the latest model re-hash security fix, so final source/package qualification, offline GUI evidence, final CI, and release publication remain pending. See the [desktop guide](apps/desktop/README.md) and [release handoff](docs/development/mvp-release-handoff.md) for the exact evidence and limits.
+The custody core, public TypeScript contracts, persistent SQLite workflow, authenticated Bare transport, and desktop renderer are implemented. Source model downloads and a two-process packaged desktop workflow passed with actual QVAC, Bare, SQLite, and protected identities; approvals and requester-local summaries were explicit automated test actions. The rebuilt `b762992` package includes the model re-hash security fix and passed relocated host/native-lifecycle probes; its Linux/macOS CI is green. Full qualification of the final archive, offline GUI evidence, and release publication remain pending. See the [desktop guide](apps/desktop/README.md) and [release handoff](docs/development/mvp-release-handoff.md) for the exact evidence and limits.
 
 ## Design principles
 
@@ -35,7 +35,7 @@ is an M5 Pro with 48 GB unified memory. Open **Setup**, start a private LAN
 workspace, then use **Models** to explicitly prepare the QVAC GTE and Qwen
 weights. Downloads report progress, validate SHA-256, and can be cancelled or
 retried; no model weights are bundled. macOS may require manual SecurityAgent
-approval for protected keychain access.
+approval for protected keychain access. The [desktop installation guide](apps/desktop/README.md#install-a-published-preview) covers Finder installation, first launch, and application replacement without development tools.
 
 Use **Spaces** to create or join a space and explicitly select the LAN endpoint.
 Use **Permissions** to set shared membership, a local grant, and any document

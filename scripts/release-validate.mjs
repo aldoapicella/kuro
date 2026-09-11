@@ -55,6 +55,19 @@ export function validateQualificationReport(report, { version, sourceSha, artifa
   if (!Array.isArray(report.unmetGates) || report.unmetGates.length) throw new Error('Qualification report has unmet gates');
 }
 
+export function validateOfflineQualification(report, { version, sourceSha, artifactSha256, captures }) {
+  if (report?.status !== 'passed' || report.version !== version || report.sourceSha !== sourceSha || report.artifactSha256 !== artifactSha256 ||
+      report.freshPeerStartup !== true || report.reconnected !== true || report.externalBlockedBefore !== true || report.externalBlockedAfter !== true ||
+      report.cleanup?.verified !== true || report.topology !== 'two-qualified-macos-guests-on-isolated-virtual-lan') throw new Error('Offline virtual GUI qualification did not prove its required boundaries');
+  const roles = ['owner', 'requester'], bootIds = roles.map(role => report.native?.[role]?.bootSessionId);
+  if (bootIds.some(id => typeof id !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) || new Set(bootIds.map(id => id.toLowerCase())).size !== 2) throw new Error('Offline qualification requires two distinct live guest boot identities');
+  if (!Array.isArray(captures) || captures.length !== 2 || captures.some(item => !Number.isSafeInteger(item.bytes) || item.bytes <= 24)) throw new Error('Offline qualification requires nonempty packet captures from both guests');
+  for (const role of roles) {
+    const path = `packets/${role}.pcap`;
+    if (report.packets?.[role] !== path || captures.filter(item => item.path === path).length !== 1) throw new Error('Offline packet evidence must identify each guest with a relative artifact path');
+  }
+}
+
 export async function sha256(path) {
   const digest = createHash('sha256');
   for await (const chunk of createReadStream(path)) digest.update(chunk);
