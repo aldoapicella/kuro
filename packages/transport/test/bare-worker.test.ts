@@ -7,6 +7,7 @@ import test from 'node:test';
 import { build } from 'esbuild';
 import spawn from 'bare-runtime/spawn';
 import type { Socket } from 'node:net';
+import childProcess, { type ChildProcess } from 'node:child_process';
 import { BareTransportWorker } from '../src/bare-worker.js';
 import { encodeIpc, IpcDecoder, MAX_IPC_BYTES, parseHostCommand, parseWorkerReply } from '../src/worker-ipc.js';
 import type { WorkerConfig } from '../src/worker-protocol.js';
@@ -94,6 +95,32 @@ test('Bare process failure and a false shutdown acknowledgement cannot report cl
       });
     });
   }
+});
+
+test('clean shutdown drains its pipe acknowledgement even when process exit is observed first', async () => {
+  const originalSpawn = childProcess.spawn;
+  // Pause after the runtime banner so the final ACK remains in the OS pipe at process exit.
+  // Node documents that exit can precede stdio drain; close is the lifecycle boundary.
+  childProcess.spawn = ((...args: unknown[]) => {
+    const child = Reflect.apply(originalSpawn, childProcess, args) as ChildProcess;
+    const pipe = child.stdio[3] as Socket | undefined;
+    if (pipe) pipe.once('data', () => pipe.pause());
+    return child;
+  }) as typeof childProcess.spawn;
+  try {
+    await withWorker(`
+      import Pipe from 'bare-pipe';
+      const pipe = new Pipe(3);
+      pipe.write(JSON.stringify({type:'runtime',version:Bare.versions.bare})+'\\n');
+      pipe.once('data', () => pipe.end(JSON.stringify({type:'stopped'})+'\\n', () => Bare.exit(0)));
+    `, async worker => {
+      let stopped = false;
+      worker.on('message', message => { if (message.type === 'stopped') stopped = true; });
+      const exitCode = await waitForOutcome(worker, 'exit');
+      assert.equal(exitCode, 0);
+      assert.equal(stopped, true, 'clean process exit lost the still-buffered shutdown ACK');
+    });
+  } finally { childProcess.spawn = originalSpawn; }
 });
 
 function waitForOutcome(worker: BareTransportWorker, expected: 'error' | 'exit'): Promise<unknown> {

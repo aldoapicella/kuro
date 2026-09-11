@@ -38,7 +38,9 @@ export class BareTransportWorker extends EventEmitter implements TransportWorker
     const decoder = new IpcDecoder();
     this.#exit = new Promise(resolve => {
       this.#child.once('error', () => { this.fail(new Error('Bare network worker could not start')); resolve(1); });
-      this.#child.once('exit', (code) => {
+      // Child exit can precede the final pipe read. Close follows stdio drain,
+      // so a buffered shutdown acknowledgement is included in the outcome.
+      this.#child.once('close', (code) => {
         const result = code ?? 1;
         if (result === 0 && this.#stopped) this.emit('message', { type: 'stopped' } satisfies FromWorker);
         this.emit('exit', result);
