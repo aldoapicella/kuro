@@ -4,7 +4,7 @@
 
 Originals and indexes remain in their custody domain. Only explicitly approved passages are copied. There is no global index, automatic onward delegation, or cloud inference. Each installation can be a custodian or a requester for different queries.
 
-**Implementation status:** this is a design specification. Official documentation and QVAC 0.19.0 package declarations were inspected during proposal preparation. A separate Python/SQLite reference model exercises selected authorization and delivery contracts. QVAC inference, the Electron application, the production SQLite adapters, and real Pear communication have not been integrated or benchmarked.
+**Implementation status:** this document remains the design specification. The TypeScript core with actual SQLite, local QVAC adapter and Bare/HyperDHT network worker are now implemented and exercised together through independent harnesses. See the [module handoff](development/core-transport-handoff.md), [D27](decisions/D27-qvac-adapter-integration.md) and [D28](decisions/D28-bare-network-worker.md) for exact evidence and limits. Electron composition/native packaging and physical two-device offline networking remain unverified. The separate Python/SQLite reference is regression evidence only.
 
 The [engineering baseline](development/engineering-baseline.md) defines shared implementation conventions, module ownership, the contract bootstrap checkpoint, and acceptance criteria. It resolves integration details such as text offsets and wire framing while preserving the decisions below.
 
@@ -605,7 +605,7 @@ Before claiming a working prototype, verify:
 | GraphRAG or custom training | No corpus or evaluation justifies its additional runtime complexity yet. Graphify development tooling is separate from product retrieval. |
 | Agents critiquing each other | Additional generation does not replace provenance, authorization, or approval. |
 
-**D17 — Reproducibility is part of the deliverable.** Pin Electron/Node, Bare, SQLite/FTS5, SDK, models/checksums, embedding profile, segmentation, ranking, tokenizer, prompt, schema, and dependency lockfile. SDK 0.19.0 is the inspected baseline, not an integrated runtime. Reused material must remain declared in the README. A simulated walkthrough does not demonstrate physical integration.
+**D17 — Reproducibility is part of the deliverable.** Pin Electron/Node, Bare, SQLite/FTS5, SDK, models/checksums, embedding profile, segmentation, ranking, tokenizer, prompt, schema, and dependency lockfile. SDK 0.19.0 is the pinned integrated runtime; observed validation and remaining host gates are recorded in D27/D28. Reused material must remain declared in the README. A simulated walkthrough does not demonstrate physical integration.
 
 ## Sources
 

@@ -1,4 +1,5 @@
-import { Worker, type WorkerOptions } from 'node:worker_threads';
+import type { Worker, WorkerOptions } from 'node:worker_threads';
+import { BareTransportWorker, type TransportWorker } from './bare-worker.js';
 import { KeySchema, type SecretStore, type TransportEvent, type TransportPort } from '@kuro/contracts';
 import { MAX_FRAME_BYTES, validateBody } from './framing.js';
 import { loadOrCreateSeed } from './secrets.js';
@@ -18,6 +19,8 @@ export interface HyperDhtTransportOptions {
   connectionTimeoutMs?: number;
   startupTimeoutMs?: number;
   shutdownTimeoutMs?: number;
+  /** Trusted host override for the built Bare worker asset when packaging the application. */
+  workerUrl?: URL;
   /** Test-only escape hatch for InMemorySecretStore; production must omit it. */
   allowEphemeralTest?: boolean;
   /** Test-only worker seam for bounded lifecycle tests. Production must omit it. */
@@ -35,6 +38,7 @@ interface ResolvedOptions {
   connectionTimeoutMs: number;
   startupTimeoutMs: number;
   shutdownTimeoutMs: number;
+  workerUrl: URL;
   workerFactory: ((url: URL, options: WorkerOptions) => Worker) | undefined;
 }
 
@@ -42,7 +46,7 @@ export class HyperDhtTransport implements TransportPort {
   readonly #listeners = new Set<(event: TransportEvent) => void>();
   readonly #pairs = new Set<string>();
   readonly #options: ResolvedOptions;
-  #worker: Worker | null = null;
+  #worker: TransportWorker | null = null;
   #publicKey: string | null = null;
   #nextId = 1;
   #pending = new Map<number, { resolve(): void; reject(error: Error): void }>();
@@ -66,6 +70,7 @@ export class HyperDhtTransport implements TransportPort {
       connectionTimeoutMs: options.connectionTimeoutMs ?? 10_000,
       startupTimeoutMs: options.startupTimeoutMs ?? 10_000,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? 5_000,
+      workerUrl: options.workerUrl ?? new URL('../dist/bare-worker.mjs', import.meta.url),
       workerFactory: options.workerFactory,
     };
     this.validateOptions();
@@ -108,10 +113,15 @@ export class HyperDhtTransport implements TransportPort {
     for (const pending of this.#pending.values()) pending.reject(new Error('Transport stopped'));
     this.#pending.clear();
     if (worker === null) return;
-    const stopped = new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => { void worker.terminate().finally(resolve); }, this.#options.shutdownTimeoutMs);
-      const onMessage = (message: FromWorker) => { if (message.type === 'stopped') { clearTimeout(timeout); worker.off('message', onMessage); resolve(); } };
+    const stopped = new Promise<void>((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timeout); worker.off('message', onMessage); worker.off('exit', onExit); worker.off('error', onError); };
+      const timeout = setTimeout(() => { cleanup(); void worker.terminate().then(() => reject(new Error('HyperDHT worker shutdown timed out')), reject); }, this.#options.shutdownTimeoutMs);
+      const onMessage = (message: FromWorker) => { if (message.type === 'stopped') { cleanup(); resolve(); } };
+      const onExit = () => { cleanup(); reject(new Error('HyperDHT worker exited before clean shutdown')); };
+      const onError = (error: Error) => { cleanup(); void worker.terminate(); reject(error); };
       worker.on('message', onMessage);
+      worker.once('exit', onExit);
+      worker.once('error', onError);
     });
     worker.postMessage({ type: 'stop' } satisfies ToWorker);
     await stopped;
@@ -142,9 +152,8 @@ export class HyperDhtTransport implements TransportPort {
     try {
       const seed = await loadOrCreateSeed(this.#options.secretStore, this.#options.secretName, this.#options.allowEphemeralTest);
       if (!this.isStarting(generation)) return;
-      const workerUrl = import.meta.url.endsWith('.ts') ? new URL('./hyperdht-worker.ts', import.meta.url) : new URL('./hyperdht-worker.js', import.meta.url);
-      const workerOptions = workerUrl.pathname.endsWith('.ts') ? { workerData: this.workerConfig(seed), execArgv: ['--import', 'tsx'] } : { workerData: this.workerConfig(seed) };
-      const worker = this.#options.workerFactory?.(workerUrl, workerOptions) ?? new Worker(workerUrl, workerOptions);
+      const workerUrl = this.#options.workerUrl;
+      const worker = this.#options.workerFactory?.(workerUrl, { workerData: this.workerConfig(seed) }) ?? new BareTransportWorker(workerUrl, this.workerConfig(seed));
       if (!this.isStarting(generation)) { void worker.terminate(); return; }
       this.#worker = worker;
       worker.on('message', (message: FromWorker) => { if (this.#worker === worker) this.onWorkerMessage(worker, message); });
@@ -154,7 +163,7 @@ export class HyperDhtTransport implements TransportPort {
       if (this.isStarting(generation)) this.fail(error instanceof Error ? error : new Error('HyperDHT worker startup failed'));
     }
   }
-  private onWorkerMessage(worker: Worker, message: FromWorker): void {
+  private onWorkerMessage(worker: TransportWorker, message: FromWorker): void {
     if (this.#worker !== worker) return;
     if (message.type === 'started') { this.#publicKey = message.publicKey; const start = this.#start; this.#start = null; this.clearStartTimeout(); start?.resolve({ publicKey: message.publicKey }); return; }
     if (message.type === 'event') { for (const listener of this.#listeners) { try { listener(message.event); } catch { /* A subscriber cannot take down transport. */ } } return; }

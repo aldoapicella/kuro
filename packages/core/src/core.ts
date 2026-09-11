@@ -197,14 +197,17 @@ export class CustodyCore implements CoreLifecyclePort {
       this.#authority.tick();await this.#incoming;
       for(const sync of this.#authority.pendingSyncSends())await this.options.transport.send(sync.peerKey,sync.bytes).catch(()=>{});
       const now=this.options.clock.wallNowMs();const mono=this.options.clock.monotonicNowMs();
-      this.#store.transaction(()=>{
+      const expiredJobIds=this.#store.transaction(()=>{
+        const jobs:string[]=[];
         const expired=this.#store.all<RequestRow>("SELECT * FROM requests WHERE state IN ('OUTGOING','RECEIVED','QUEUED','RETRIEVING','REVIEW') AND (expires_wall<=? OR expires_mono<=?)",now,mono);
         for(const row of expired){
           this.#store.run("UPDATE requests SET state='EXPIRED' WHERE request_id=?",row.request_id);
           this.#store.run("UPDATE reviews SET state='EXPIRED' WHERE request_id=? AND state='REVIEW'",row.request_id);
-          if(row.job_id)this.#store.run("UPDATE jobs SET state='EXPIRED' WHERE job_id=? AND state IN ('QUEUED','RUNNING')",row.job_id);
+          if(row.job_id&&this.#store.run("UPDATE jobs SET state='EXPIRED',error_code='EXPIRED' WHERE job_id=? AND state IN ('QUEUED','RUNNING')",row.job_id).changes===1)jobs.push(row.job_id);
         }
+        return jobs;
       });
+      for(const jobId of expiredJobIds)void this.options.ai.cancel(jobId).catch(()=>{});
       for(const row of this.#store.all<RequestRow>("SELECT * FROM requests WHERE direction='OUT' AND state='OUTGOING' AND next_attempt<=? LIMIT 16",now)){
         try{
           const bytes=this.#store.transaction(()=>{

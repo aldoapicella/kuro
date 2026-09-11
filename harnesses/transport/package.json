@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "smoke": "node --import tsx src/real-smoke.ts"
+    "smoke": "pnpm --filter @kuro/transport build:worker && node --import tsx src/real-smoke.ts",
+    "core-smoke": "pnpm --filter @kuro/transport build:worker && node --import tsx src/virtual-core.ts"
   },
   "dependencies": {
     "@kuro/contracts": "workspace:*",

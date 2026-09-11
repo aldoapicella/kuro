@@ -1,6 +1,6 @@
 # Contributing to KURO
 
-Start with the shared [agent instructions](AGENTS.md), [engineering baseline](docs/development/engineering-baseline.md), and relevant [architecture](docs/architecture.md) sections. The baseline defines ownership, contracts and acceptance criteria. The TypeScript contracts, custody core and Node HyperDHT adapter are implemented alongside the Python design reference. Desktop and QVAC adapters integrate through the public ports.
+Start with the shared [agent instructions](AGENTS.md), [engineering baseline](docs/development/engineering-baseline.md), and relevant [architecture](docs/architecture.md) sections. The baseline defines ownership, contracts and acceptance criteria. The TypeScript contracts, custody core and Node-hosted Bare HyperDHT adapter are implemented alongside the Python design reference. Desktop and QVAC adapters integrate through the public ports.
 
 ## Module boundaries
 

@@ -6,6 +6,7 @@ summary preparation and generation over synthetic evidence.
 ```sh
 pnpm install --frozen-lockfile
 pnpm --filter @kuro/ai-harness harness
+pnpm --filter @kuro/ai probe:runtime
 pnpm --filter @kuro/ai-harness harness --with-qvac
 pnpm --filter @kuro/ai-harness harness --with-qvac --embeddings-only
 ```
@@ -18,9 +19,15 @@ outcome, then closes the runtime. Failed inference exits nonzero; no fake fallba
 
 On macOS arm64, the pinned QVAC native addon links Homebrew OpenSSL 3 at
 `/opt/homebrew/opt/openssl@3`; install it with `brew install openssl@3` before real
-execution. The workspace narrowly hoists `require-asset` so Bare platform packages
-can resolve their asset loader with pnpm; the package manager and shared lock remain
-unchanged.
+execution. `@kuro/ai` explicitly depends on `require-asset`, and the workspace narrowly
+hoists it so Bare platform packages can resolve their asset loader with pnpm. Hoisting
+alone does not reliably install that optional transitive dependency in a clean checkout.
+The runtime probe starts the actual SDK worker and checks its heartbeat without loading
+models; Linux/macOS CI runs it after a frozen install.
+
+On minimal Ubuntu 24.04 arm64, install `libatomic1` before starting the SDK worker
+(`sudo apt-get install libatomic1`). Its RocksDB native dependency needs
+`libatomic.so.1`; a package install alone does not provide system shared libraries.
 
 Real mode downloads models on first use: approximately 670 MB for GTE and 1.1 GB for
 Qwen. QVAC caches weights outside the repository under its configured cache directory
