@@ -5,7 +5,8 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "test": "node --import tsx --test test/*.test.ts"
+    "build:worker": "node scripts/build-worker.mjs",
+    "test": "pnpm build:worker && node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@kuro/contracts": "workspace:*",
